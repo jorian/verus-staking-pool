@@ -1,0 +1,8 @@
+[workspace]
+members = ["pool", "lib"]
+
+[workspace.package]
+version = "0.0.1"
+authors = ["jorian"]
+description = "Verus Staking Pool"
+edition = "2021"

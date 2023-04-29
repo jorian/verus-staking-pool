@@ -1,0 +1,51 @@
+[package]
+name = "pool"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+edition.workspace = true
+
+
+[dependencies]
+rust_decimal = "1.28.1"
+serde = { version = "1", features = ["derive"] }
+serde_derive = "1"
+tokio = { version = "1.25.0", features = ["full"] }
+tmq = { version = "0.3.2" }
+zmq = { version = "0.10.0" }
+rand = "0.8.5"
+rmp-serde = "1.1"
+poollib = { path = "../lib" }
+rmpv = "1"
+color-eyre = "0.6.1"
+futures = "0.3.26"
+tracing = "0.1.26"
+tracing-subscriber = { version = "0.3.5", features = [
+    "env-filter",
+    "std",
+    "json",
+] }
+tracing-bunyan-formatter = "0.3.3"
+# vrsc-rpc = { version = "0.1.10" }
+vrsc-rpc = { path = "../../rust-vrsc-rpc/client" }
+config = { version = "0.13", default-features = false, features = ["toml"] }
+serde-aux = "4.0.0"
+secrecy = { version = "0.8", features = ["serde"] }
+async-nats = "0.29.0"
+serde_json = "1"
+tracing-test = "0.2.4"
+tracing-appender = "0.2.2"
+chrono = { version = "0.4", features = ["clock"] }
+
+# opentelemetry-prometheus = "0.12.0"
+# opentelemetry = { version = "0.18.0", default-features = false, features = [
+#     "trace",
+#     "rt-tokio",
+# ] }
+# tracing-opentelemetry = "0.18.0"
+# opentelemetry-otlp = { version = "0.11.0", features = [
+#     "reqwest-client",
+#     "reqwest-rustls",
+#     "http-proto",
+# ] }
+# opentelemetry-semantic-conventions = "0.9.0"
