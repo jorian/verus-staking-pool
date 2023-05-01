@@ -3,7 +3,7 @@ use std::{convert::Infallible, str::FromStr};
 use color_eyre::Report;
 pub use rmp_serde::{Deserializer, Serializer};
 use rust_decimal::Decimal;
-pub use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 pub use sqlx::PgPool;
 use vrsc_rpc::{
     bitcoin::{BlockHash, Txid},
@@ -53,13 +53,14 @@ pub struct StakeMember {
     pub fee: Decimal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Subscriber {
     pub currencyid: Address,
     pub identity_address: Address,
     pub identity_name: String,
     pub discord_user_id: u64,
     pub bot_address: Address,
+    #[serde(with = "as_sat")]
     pub min_payout: Amount,
     pub status: String,
 }

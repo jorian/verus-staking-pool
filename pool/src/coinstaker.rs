@@ -605,6 +605,16 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     os_tx.send(stakes).unwrap();
                 }
                 CoinStakerMessage::Heartbeat(os_tx) => os_tx.send(()).unwrap(),
+                CoinStakerMessage::GetSubscriptions(os_tx, identityaddresses) => {
+                    let subscribers = database::get_subscribers(
+                        &cs.pool,
+                        &cs.chain.currencyid.to_string(),
+                        &identityaddresses,
+                    )
+                    .await?;
+
+                    os_tx.send(subscribers).unwrap();
+                }
             }
         }
     } else {
@@ -1018,6 +1028,7 @@ pub enum CoinStakerMessage {
     PendingStakes(oneshot::Sender<Vec<Stake>>),
     SetMinPayout(oneshot::Sender<serde_json::Value>, String, u64),
     Heartbeat(oneshot::Sender<()>),
+    GetSubscriptions(oneshot::Sender<Vec<Subscriber>>, Vec<String>),
 }
 
 // IPC API
@@ -1040,7 +1051,7 @@ async fn nats_server(
                 debug!("new NATS message on {}: {:?}", &currencyid, &request);
 
                 if let Some(reply) = request.reply {
-                    let payload: Payload =
+                    let mut payload: Payload =
                         serde_json::from_slice::<Payload>(request.payload.as_ref())?;
 
                     match &*payload.command {
@@ -1059,7 +1070,31 @@ async fn nats_server(
                             }
                         }
                         "newpendingsubscriber" => {}
-                        "getsubscriptions" => {}
+                        // it takes the current currencyid as the currencyid in the database call.
+                        "getsubscriptions" => {
+                            let (os_tx, os_rx) = oneshot::channel::<Vec<Subscriber>>();
+                            let mut data = payload.data;
+                            debug!("data: {data:?}");
+                            let identityaddresses: Vec<String> =
+                                serde_json::from_value(data["identityaddresses"].take())?;
+                            debug!("{identityaddresses:?}");
+
+                            cs_tx
+                                .send(CoinStakerMessage::GetSubscriptions(
+                                    os_tx,
+                                    identityaddresses,
+                                ))
+                                .await?;
+
+                            let subscribers = os_rx.await?;
+
+                            client
+                                .publish(
+                                    reply,
+                                    json!({ "result": &subscribers }).to_string().into(),
+                                )
+                                .await?
+                        }
                         "newaddress" => {
                             let (os_tx, os_rx) = oneshot::channel::<Address>();
                             cs_tx.send(CoinStakerMessage::NewAddress(os_tx)).await?;
