@@ -1058,6 +1058,8 @@ async fn nats_server(
                                     .await?
                             }
                         }
+                        "newpendingsubscriber" => {}
+                        "getsubscriptions" => {}
                         "newaddress" => {
                             let (os_tx, os_rx) = oneshot::channel::<Address>();
                             cs_tx.send(CoinStakerMessage::NewAddress(os_tx)).await?;
