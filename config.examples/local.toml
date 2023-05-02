@@ -1,0 +1,5 @@
+discord_token = "<discord bot token>"
+
+[database]
+database_name = "<db name>"
+password = "<db password>"

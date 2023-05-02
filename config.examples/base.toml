@@ -1,0 +1,8 @@
+[application]
+enable_tracing = true
+trace_level = "debug"
+
+[database]
+host = "127.0.0.1"
+port = 5432
+username = "postgres"

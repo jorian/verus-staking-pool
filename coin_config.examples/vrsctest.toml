@@ -1,0 +1,13 @@
+bot_fee_discount = 0.0                                                                  # a global discount of the bot fee, in basis points. Setting this to 0.01 lowers the fee with 1 basis point for everyone
+bot_identity_address = "<i address of pool VerusID"
+name = "vrsctest"
+currencyid = "iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq"                                       # currency id of chain
+currencyidhex = "2d4eb6919e9fdb2934ff2481325e6335a29eefa6"                              # currencyidhex of chain
+rpc_user = "user3800425087"
+rpc_password = "pass2993ae4826d3ddb3ea2d1a33bc004bc12e87f544ce2e5a5188b62de9c98c0d8d5d"
+rpc_port = 18299                                                                        # rpc port of daemon
+default_bot_fee = 0.05                                                                  # fee of bot in basis points (0.05 = 5%)
+default_min_payout = 800000000                                                          # default min payout for every new subscriber, in sats
+default_tx_fee = 10000                                                                  # tx fee of payments, in sats
+testnet = true                                                                          # is this a testnet chain
+zmq_port_blocknotify = 18400                                                            # the zmqpubblockhash port as defined in the chain's config (see README.md)
