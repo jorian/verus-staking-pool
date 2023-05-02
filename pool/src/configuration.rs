@@ -31,7 +31,6 @@ pub async fn get_app_config() -> Result<AppConfig, Report> {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
-    pub discord_token: String,
     pub database: DbConfig,
 }
 

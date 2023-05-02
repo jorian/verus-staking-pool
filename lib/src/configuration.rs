@@ -47,7 +47,7 @@ pub fn get_coin_configurations() -> Result<Vec<CoinConfig>, Report> {
             }
         }
     } else {
-        warn!("no `config` directory set in root directory");
+        warn!("no `coin_config` directory set in root directory");
     }
     debug!("coin_settings: {:?}", coin_settings);
 
