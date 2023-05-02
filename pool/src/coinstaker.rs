@@ -22,7 +22,7 @@ use tokio::sync::{
     mpsc::{self},
     oneshot,
 };
-use tracing::{debug, error, info, instrument, trace};
+use tracing::{debug, error, info, instrument, trace, warn};
 use vrsc_rpc::{
     bitcoin::BlockHash,
     json::{
@@ -122,9 +122,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
         let client = cs.chain.verusd_client()?;
 
         if !client.get_mining_info()?.staking {
-            error!("daemon is not staking, aborting");
-
-            return Ok(());
+            warn!("daemon is not staking, subscriber work will not be accumulated");
         }
 
         // NATS listener
@@ -248,9 +246,10 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     if let Ok(client) = cs.chain.verusd_client() {
                         // check if daemon is still staking:
                         if !client.get_mining_info()?.staking {
-                            error!("daemon not staking anymore, shutting down");
+                            warn!("daemon not staking anymore, not counting work");
 
-                            return Ok(());
+                            // return Ok(());
+                            continue;
                         }
 
                         let active_subscribers = database::get_subscribers_by_status(
@@ -292,8 +291,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                             "blockhash": stake.blockhash,
                             "blockheight": stake.blockheight,
                             "chain_name": cs.chain.name,
-
-
                         }),
                     };
 
@@ -614,6 +611,13 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     .await?;
 
                     os_tx.send(subscribers).unwrap();
+                }
+                CoinStakerMessage::SetStaking(os_tx, generate) => {
+                    let client = cs.chain.verusd_client()?;
+
+                    client.set_generate(generate, 0)?;
+
+                    os_tx.send(()).unwrap();
                 }
             }
         }
@@ -1029,6 +1033,7 @@ pub enum CoinStakerMessage {
     SetMinPayout(oneshot::Sender<serde_json::Value>, String, u64),
     Heartbeat(oneshot::Sender<()>),
     GetSubscriptions(oneshot::Sender<Vec<Subscriber>>, Vec<String>),
+    SetStaking(oneshot::Sender<()>, bool),
 }
 
 // IPC API
@@ -1066,6 +1071,31 @@ async fn nats_server(
                             } else {
                                 client
                                     .publish(reply, json!({"alive": false}).to_string().into())
+                                    .await?
+                            }
+                        }
+                        // does `setgenerate true 0` when true, `setgenerate false` when false
+                        "setstaking" => {
+                            let generate = payload.data["staking_enabled"].as_bool().unwrap();
+                            let (os_tx, os_rx) = oneshot::channel::<()>();
+
+                            cs_tx
+                                .send(CoinStakerMessage::SetStaking(os_tx, generate))
+                                .await?;
+
+                            if let Ok(res) = os_rx.await {
+                                client
+                                    .publish(
+                                        reply,
+                                        json!({ "result": "success" }).to_string().into(),
+                                    )
+                                    .await?
+                            } else {
+                                client
+                                    .publish(
+                                        reply,
+                                        json!({ "result": "failed" }).to_string().into(),
+                                    )
                                     .await?
                             }
                         }
