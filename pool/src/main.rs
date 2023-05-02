@@ -22,7 +22,7 @@ async fn main() -> Result<(), Report> {
         senders: HashMap::new(),
     };
 
-    while let Err(e) = csm.start().await {
+    if let Err(e) = csm.start().await {
         error!("CSM error: {:?}", e);
     }
 
