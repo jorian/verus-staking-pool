@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use color_eyre::Report;
 use serde::Deserialize;
 use serde_aux::prelude::deserialize_number_from_string;
-use tracing::debug;
+use tracing::{debug, warn};
 use vrsc_rpc::json::vrsc::Address;
 
 use crate::chain::Chain;
@@ -31,19 +31,23 @@ pub fn get_coin_configurations() -> Result<Vec<CoinConfig>, Report> {
     let config_dir = base_path.join("coin_config");
     let mut coin_settings = vec![];
 
-    for entry in config_dir.read_dir()? {
-        let entry = entry?;
-        let path = PathBuf::from(entry.file_name());
-        if let Some(extension) = path.extension() {
-            if extension.eq_ignore_ascii_case("toml") {
-                let settings = config::Config::builder()
-                    .add_source(config::File::from(config_dir.join(&path)))
-                    .build()?
-                    .try_deserialize::<CoinConfig>()?;
+    if let Ok(dir) = config_dir.read_dir() {
+        for entry in dir {
+            let entry = entry?;
+            let path = PathBuf::from(entry.file_name());
+            if let Some(extension) = path.extension() {
+                if extension.eq_ignore_ascii_case("toml") {
+                    let settings = config::Config::builder()
+                        .add_source(config::File::from(config_dir.join(&path)))
+                        .build()?
+                        .try_deserialize::<CoinConfig>()?;
 
-                coin_settings.push(settings);
+                    coin_settings.push(settings);
+                }
             }
         }
+    } else {
+        warn!("no `config` directory set in root directory");
     }
     debug!("coin_settings: {:?}", coin_settings);
 
