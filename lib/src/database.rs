@@ -22,7 +22,6 @@ pub async fn insert_subscriber(
     identity_address: &str,
     identity_name: &str,
     status: &str,
-    discord_user_id: u64,
     bot_address: &str,
     fee: f32,
     min_payout: u64,
@@ -31,8 +30,8 @@ pub async fn insert_subscriber(
 
     let row = sqlx::query!(
         "INSERT INTO subscriptions(
-            currencyid, identityaddress, identityname, status, discord_user_id, botaddress, fee, min_payout
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            currencyid, identityaddress, identityname, status, pool_address, fee, min_payout
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (currencyid, identityaddress) DO
         UPDATE SET status = $4
         WHERE subscriptions.identityaddress = EXCLUDED.identityaddress AND subscriptions.status = 'unsubscribed'
@@ -41,7 +40,6 @@ pub async fn insert_subscriber(
         identity_address,
         identity_name,
         status,
-        format!("{}", discord_user_id),
         bot_address,
         fee,
         min_payout as i64
@@ -53,9 +51,8 @@ pub async fn insert_subscriber(
         currencyid: Address::from_str(&row.currencyid)?,
         identity_address: Address::from_str(&row.identityaddress)?,
         identity_name: row.identityname,
-        discord_user_id: row.discord_user_id.parse::<u64>()?,
-        bot_address: Address::from_str(&row.botaddress)?,
-        status: row.status.unwrap_or(String::new()),
+        pool_address: Address::from_str(&row.pool_address)?,
+        status: row.status,
         min_payout: Amount::from_sat(row.min_payout as u64),
     })
 }
@@ -77,9 +74,8 @@ pub async fn get_subscriber(
             currencyid: Address::from_str(&row.currencyid)?,
             identity_address: Address::from_str(&row.identityaddress)?,
             identity_name: row.identityname,
-            discord_user_id: row.discord_user_id.parse::<u64>()?,
-            bot_address: Address::from_str(&row.botaddress)?,
-            status: row.status.unwrap_or(String::new()),
+            pool_address: Address::from_str(&row.pool_address)?,
+            status: row.status,
             min_payout: Amount::from_sat(row.min_payout as u64),
         }));
     }
@@ -108,10 +104,9 @@ pub async fn get_subscribers(
             currencyid: Address::from_str(&row.currencyid)?,
             identity_address: Address::from_str(&row.identityaddress)?,
             identity_name: row.identityname,
-            discord_user_id: row.discord_user_id.parse::<u64>()?,
-            bot_address: Address::from_str(&row.botaddress)?,
+            pool_address: Address::from_str(&row.pool_address)?,
             min_payout: Amount::from_sat(row.min_payout as u64),
-            status: row.status.unwrap_or(String::new()),
+            status: row.status,
         })
     })
     .collect::<Result<Vec<_>, _>>()
@@ -136,10 +131,9 @@ pub async fn get_subscribers_by_status(
                 currencyid: Address::from_str(&row.currencyid)?,
                 identity_address: Address::from_str(&row.identityaddress)?,
                 identity_name: row.identityname,
-                discord_user_id: row.discord_user_id.parse::<u64>()?,
-                bot_address: Address::from_str(&row.botaddress)?,
+                pool_address: Address::from_str(&row.pool_address)?,
                 min_payout: Amount::from_sat(row.min_payout as u64),
-                status: row.status.unwrap_or(String::new()),
+                status: row.status,
             })
         })
         .collect::<Result<Vec<_>, _>>()
@@ -185,53 +179,52 @@ pub async fn update_subscriber_min_payout(
     Ok(())
 }
 
-pub async fn get_subscriptions(pool: &PgPool, user_id: u64) -> Result<Vec<Subscriber>, Report> {
-    let rows = sqlx::query!(
-        "SELECT * FROM subscriptions WHERE discord_user_id = $1",
-        &format!("{}", user_id)
-    )
-    .fetch_all(pool)
-    .await?;
+// pub async fn get_subscriptions(pool: &PgPool, user_id: u64) -> Result<Vec<Subscriber>, Report> {
+//     let rows = sqlx::query!(
+//         "SELECT * FROM subscriptions WHERE discord_user_id = $1",
+//         &format!("{}", user_id)
+//     )
+//     .fetch_all(pool)
+//     .await?;
 
-    rows.into_iter()
-        .map(|row| {
-            Ok(Subscriber {
-                currencyid: Address::from_str(&row.currencyid)?,
-                identity_address: Address::from_str(&row.identityaddress)?,
-                identity_name: row.identityname,
-                discord_user_id: row.discord_user_id.parse::<u64>()?,
-                bot_address: Address::from_str(&row.botaddress)?,
-                min_payout: Amount::from_sat(row.min_payout as u64),
-                status: row.status.unwrap_or(String::new()),
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()
-}
+//     rows.into_iter()
+//         .map(|row| {
+//             Ok(Subscriber {
+//                 currencyid: Address::from_str(&row.currencyid)?,
+//                 identity_address: Address::from_str(&row.identityaddress)?,
+//                 identity_name: row.identityname,
+//                 bot_address: Address::from_str(&row.pool_address)?,
+//                 min_payout: Amount::from_sat(row.min_payout as u64),
+//                 status: row.status,
+//             })
+//         })
+//         .collect::<Result<Vec<_>, _>>()
+// }
 
-pub async fn get_total_paid_out_by_user_id(
-    pool: &PgPool,
-    user_id: u64,
-    currencyid: &str,
-) -> Result<sqlx::types::Decimal, Report> {
-    let row = sqlx::query!(
-        "WITH identities AS (
-            SELECT identityaddress
-            FROM subscriptions
-            WHERE discord_user_id = $1 
-            AND currencyid = $2
-        )
-        SELECT SUM(amount) sum
-        FROM identities
-        INNER JOIN transactions USING (identityaddress)
-        GROUP BY identityaddress",
-        user_id as i64,
-        currencyid
-    )
-    .fetch_one(pool)
-    .await?;
+// pub async fn get_total_paid_out_by_user_id(
+//     pool: &PgPool,
+//     user_id: u64,
+//     currencyid: &str,
+// ) -> Result<sqlx::types::Decimal, Report> {
+//     let row = sqlx::query!(
+//         "WITH identities AS (
+//             SELECT identityaddress
+//             FROM subscriptions
+//             WHERE discord_user_id = $1
+//             AND currencyid = $2
+//         )
+//         SELECT SUM(amount) sum
+//         FROM identities
+//         INNER JOIN transactions USING (identityaddress)
+//         GROUP BY identityaddress",
+//         user_id as i64,
+//         currencyid
+//     )
+//     .fetch_one(pool)
+//     .await?;
 
-    Ok(row.sum.unwrap_or(Decimal::default()))
-}
+//     Ok(row.sum.unwrap_or(Decimal::default()))
+// }
 
 pub async fn insert_stake(pool: &PgPool, stake: &Stake) -> Result<(), Report> {
     sqlx::query!(
@@ -767,7 +760,6 @@ mod tests {
 
         let identity_name = "test@";
         let status = "pending";
-        let discord_user_id = 242635006516658197;
         let bot_address = "RKsy4WEdAd29XAvTJsKaDNtD3PxGRzSQdu";
 
         insert_subscriber(
@@ -776,7 +768,6 @@ mod tests {
             ALICE,
             identity_name,
             status,
-            discord_user_id,
             bot_address,
             5.0,
             1_000_000_000,
@@ -795,10 +786,6 @@ mod tests {
         assert_eq!(
             Decimal::from_f32(5.0).unwrap(),
             inserted_subscriber.get::<Decimal, &str>("fee")
-        );
-        assert_eq!(
-            format!("{}", discord_user_id),
-            inserted_subscriber.get::<String, &str>("discord_user_id")
         );
 
         Ok(())

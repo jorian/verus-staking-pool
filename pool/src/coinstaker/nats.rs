@@ -125,13 +125,6 @@ pub async fn nats_server(
                                 )
                                 .await?
                         }
-                        // "newaddress" => {
-                        //     let (os_tx, os_rx) = oneshot::channel::<Address>();
-                        //     cs_tx.send(CoinStakerMessage::NewAddress(os_tx)).await?;
-
-                        //     let address = os_rx.await?;
-                        //     client.publish(reply, address.to_string().into()).await?
-                        // }
                         "stakingsupply" => {
                             let (os_tx, os_rx) = oneshot::channel::<(f64, f64, f64)>();
                             cs_tx

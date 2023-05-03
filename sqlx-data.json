@@ -1,79 +1,5 @@
 {
   "db": "PostgreSQL",
-  "00831b0bbbd4bd4fd7f07619a2fccf0f3bd771269a0f19b6483b30c14702c275": {
-    "describe": {
-      "columns": [
-        {
-          "name": "identityaddress",
-          "ordinal": 0,
-          "type_info": "Varchar"
-        },
-        {
-          "name": "identityname",
-          "ordinal": 1,
-          "type_info": "Text"
-        },
-        {
-          "name": "status",
-          "ordinal": 2,
-          "type_info": "Text"
-        },
-        {
-          "name": "discord_user_id",
-          "ordinal": 3,
-          "type_info": "Text"
-        },
-        {
-          "name": "created_at",
-          "ordinal": 4,
-          "type_info": "Timestamptz"
-        },
-        {
-          "name": "updated_at",
-          "ordinal": 5,
-          "type_info": "Timestamptz"
-        },
-        {
-          "name": "currencyid",
-          "ordinal": 6,
-          "type_info": "Varchar"
-        },
-        {
-          "name": "botaddress",
-          "ordinal": 7,
-          "type_info": "Varchar"
-        },
-        {
-          "name": "fee",
-          "ordinal": 8,
-          "type_info": "Numeric"
-        },
-        {
-          "name": "min_payout",
-          "ordinal": 9,
-          "type_info": "Int8"
-        }
-      ],
-      "nullable": [
-        false,
-        false,
-        true,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false
-      ],
-      "parameters": {
-        "Left": [
-          "Text"
-        ]
-      }
-    },
-    "query": "SELECT * FROM subscriptions WHERE discord_user_id = $1"
-  },
   "083ea866a75dbb57350829e59349d70ea2798b6e6571c1d58e32fe1b7a9ee163": {
     "describe": {
       "columns": [],
@@ -203,87 +129,6 @@
     },
     "query": "SELECT * \n        FROM stakes \n        WHERE currencyid = $1 AND created_at > $2"
   },
-  "2886aeb676dc39cb29d5d4f3dda6b0819bac2e44942d39741506f052f726fc5e": {
-    "describe": {
-      "columns": [
-        {
-          "name": "identityaddress",
-          "ordinal": 0,
-          "type_info": "Varchar"
-        },
-        {
-          "name": "identityname",
-          "ordinal": 1,
-          "type_info": "Text"
-        },
-        {
-          "name": "status",
-          "ordinal": 2,
-          "type_info": "Text"
-        },
-        {
-          "name": "discord_user_id",
-          "ordinal": 3,
-          "type_info": "Text"
-        },
-        {
-          "name": "created_at",
-          "ordinal": 4,
-          "type_info": "Timestamptz"
-        },
-        {
-          "name": "updated_at",
-          "ordinal": 5,
-          "type_info": "Timestamptz"
-        },
-        {
-          "name": "currencyid",
-          "ordinal": 6,
-          "type_info": "Varchar"
-        },
-        {
-          "name": "botaddress",
-          "ordinal": 7,
-          "type_info": "Varchar"
-        },
-        {
-          "name": "fee",
-          "ordinal": 8,
-          "type_info": "Numeric"
-        },
-        {
-          "name": "min_payout",
-          "ordinal": 9,
-          "type_info": "Int8"
-        }
-      ],
-      "nullable": [
-        false,
-        false,
-        true,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false
-      ],
-      "parameters": {
-        "Left": [
-          "Varchar",
-          "Varchar",
-          "Text",
-          "Text",
-          "Text",
-          "Varchar",
-          "Numeric",
-          "Int8"
-        ]
-      }
-    },
-    "query": "INSERT INTO subscriptions(\n            currencyid, identityaddress, identityname, status, discord_user_id, botaddress, fee, min_payout\n        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        ON CONFLICT (currencyid, identityaddress) DO\n        UPDATE SET status = $4\n        WHERE subscriptions.identityaddress = EXCLUDED.identityaddress AND subscriptions.status = 'unsubscribed'\n        RETURNING *"
-  },
   "2a9c8474af71ffc5f255ad9cd970dadca071cd0cbd3b66f2396e2becabbca8b4": {
     "describe": {
       "columns": [],
@@ -335,45 +180,39 @@
           "type_info": "Text"
         },
         {
-          "name": "discord_user_id",
-          "ordinal": 3,
-          "type_info": "Text"
-        },
-        {
           "name": "created_at",
-          "ordinal": 4,
+          "ordinal": 3,
           "type_info": "Timestamptz"
         },
         {
           "name": "updated_at",
-          "ordinal": 5,
+          "ordinal": 4,
           "type_info": "Timestamptz"
         },
         {
           "name": "currencyid",
+          "ordinal": 5,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "pool_address",
           "ordinal": 6,
           "type_info": "Varchar"
         },
         {
-          "name": "botaddress",
-          "ordinal": 7,
-          "type_info": "Varchar"
-        },
-        {
           "name": "fee",
-          "ordinal": 8,
+          "ordinal": 7,
           "type_info": "Numeric"
         },
         {
           "name": "min_payout",
-          "ordinal": 9,
+          "ordinal": 8,
           "type_info": "Int8"
         }
       ],
       "nullable": [
         false,
         false,
-        true,
         false,
         false,
         false,
@@ -443,45 +282,39 @@
           "type_info": "Text"
         },
         {
-          "name": "discord_user_id",
-          "ordinal": 3,
-          "type_info": "Text"
-        },
-        {
           "name": "created_at",
-          "ordinal": 4,
+          "ordinal": 3,
           "type_info": "Timestamptz"
         },
         {
           "name": "updated_at",
-          "ordinal": 5,
+          "ordinal": 4,
           "type_info": "Timestamptz"
         },
         {
           "name": "currencyid",
+          "ordinal": 5,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "pool_address",
           "ordinal": 6,
           "type_info": "Varchar"
         },
         {
-          "name": "botaddress",
-          "ordinal": 7,
-          "type_info": "Varchar"
-        },
-        {
           "name": "fee",
-          "ordinal": 8,
+          "ordinal": 7,
           "type_info": "Numeric"
         },
         {
           "name": "min_payout",
-          "ordinal": 9,
+          "ordinal": 8,
           "type_info": "Int8"
         }
       ],
       "nullable": [
         false,
         false,
-        true,
         false,
         false,
         false,
@@ -518,45 +351,39 @@
           "type_info": "Text"
         },
         {
-          "name": "discord_user_id",
-          "ordinal": 3,
-          "type_info": "Text"
-        },
-        {
           "name": "created_at",
-          "ordinal": 4,
+          "ordinal": 3,
           "type_info": "Timestamptz"
         },
         {
           "name": "updated_at",
-          "ordinal": 5,
+          "ordinal": 4,
           "type_info": "Timestamptz"
         },
         {
           "name": "currencyid",
+          "ordinal": 5,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "pool_address",
           "ordinal": 6,
           "type_info": "Varchar"
         },
         {
-          "name": "botaddress",
-          "ordinal": 7,
-          "type_info": "Varchar"
-        },
-        {
           "name": "fee",
-          "ordinal": 8,
+          "ordinal": 7,
           "type_info": "Numeric"
         },
         {
           "name": "min_payout",
-          "ordinal": 9,
+          "ordinal": 8,
           "type_info": "Int8"
         }
       ],
       "nullable": [
         false,
         false,
-        true,
         false,
         false,
         false,
@@ -632,6 +459,80 @@
       }
     },
     "query": "SELECT identityaddress, SUM(reward) as sum\n        FROM payout_members \n        WHERE identityaddress = $1\n            AND currencyid = $2\n        GROUP BY identityaddress"
+  },
+  "d2a635ad4e2f14cc76a9948489e4277294ea23d61deb950ebf495ffaf5ef1832": {
+    "describe": {
+      "columns": [
+        {
+          "name": "identityaddress",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "identityname",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "status",
+          "ordinal": 2,
+          "type_info": "Text"
+        },
+        {
+          "name": "created_at",
+          "ordinal": 3,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "updated_at",
+          "ordinal": 4,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "currencyid",
+          "ordinal": 5,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "pool_address",
+          "ordinal": 6,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "fee",
+          "ordinal": 7,
+          "type_info": "Numeric"
+        },
+        {
+          "name": "min_payout",
+          "ordinal": 8,
+          "type_info": "Int8"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Varchar",
+          "Varchar",
+          "Text",
+          "Text",
+          "Varchar",
+          "Numeric",
+          "Int8"
+        ]
+      }
+    },
+    "query": "INSERT INTO subscriptions(\n            currencyid, identityaddress, identityname, status, pool_address, fee, min_payout\n        ) VALUES ($1, $2, $3, $4, $5, $6, $7)\n        ON CONFLICT (currencyid, identityaddress) DO\n        UPDATE SET status = $4\n        WHERE subscriptions.identityaddress = EXCLUDED.identityaddress AND subscriptions.status = 'unsubscribed'\n        RETURNING *"
   },
   "d2b788caf56bf5a977fdf292e63c45f6b26cd241f482267c53c3f21e49d274cc": {
     "describe": {
@@ -853,27 +754,6 @@
       }
     },
     "query": "SELECT * FROM stakes WHERE currencyid = $1 AND status = 'pending'"
-  },
-  "eef9d8b1e32028733ffc0c08e33db665ddcbc4091ec64efb20a332f68f9769d2": {
-    "describe": {
-      "columns": [
-        {
-          "name": "sum",
-          "ordinal": 0,
-          "type_info": "Numeric"
-        }
-      ],
-      "nullable": [
-        null
-      ],
-      "parameters": {
-        "Left": [
-          "Text",
-          "Text"
-        ]
-      }
-    },
-    "query": "WITH identities AS (\n            SELECT identityaddress\n            FROM subscriptions\n            WHERE discord_user_id = $1 \n            AND currencyid = $2\n        )\n        SELECT SUM(amount) sum\n        FROM identities\n        INNER JOIN transactions USING (identityaddress)\n        GROUP BY identityaddress"
   },
   "fa3a057542567994f68dddc993d6d3cdda3c0f4815421b20d6380ddf5a34970f": {
     "describe": {

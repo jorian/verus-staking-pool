@@ -58,8 +58,7 @@ pub struct Subscriber {
     pub currencyid: Address,
     pub identity_address: Address,
     pub identity_name: String,
-    pub discord_user_id: u64,
-    pub bot_address: Address,
+    pub pool_address: Address,
     #[serde(with = "as_sat")]
     pub min_payout: Amount,
     pub status: String,

@@ -97,14 +97,14 @@ impl CoinStaker {
         if self.chain.testnet {
             if identity.minimumsignatures == 1
                 && identity.primaryaddresses.len() > 1
-                && identity.primaryaddresses.contains(&subscriber.bot_address)
+                && identity.primaryaddresses.contains(&subscriber.pool_address)
             {
                 return true;
             }
         } else {
             if identity.minimumsignatures == 1
                 && identity.primaryaddresses.len() > 1
-                && identity.primaryaddresses.contains(&subscriber.bot_address)
+                && identity.primaryaddresses.contains(&subscriber.pool_address)
                 && identity.revocationauthority.ne(&identity.identityaddress)
                 && identity.recoveryauthority.ne(&identity.identityaddress)
                 && identity.flags == 2
@@ -248,12 +248,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     trace!("blocknotify for {}", cs.chain);
                     if let Ok(client) = cs.chain.verusd_client() {
                         // check if daemon is still staking:
-                        if !client.get_mining_info()?.staking {
-                            warn!("daemon not staking anymore, not counting work");
-
-                            // return Ok(());
-                            continue;
-                        }
 
                         let active_subscribers = database::get_subscribers_by_status(
                             &cs.pool,
@@ -265,21 +259,26 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         // get additional information about the incoming block:
                         let block = client.get_block(&blockhash, 2)?;
 
-                        // add the work up until here
-                        add_work(&active_subscribers, &client, &mut cs, block.height).await?;
-
-                        // check if block was staked by us
-
-                        if let Err(e) = check_for_stake(&block, &active_subscribers, &mut cs).await
-                        {
-                            error!("{:?}\n{:#?}\n{:#?}", e, &block, &active_subscribers);
-                        };
-
                         for tx in block.tx.iter() {
                             for vout in tx.vout.iter() {
                                 check_subscriptions(&mut cs, vout, &active_subscribers).await?;
                             }
                         }
+
+                        // break if daemon is not staking
+                        if !client.get_mining_info()?.staking {
+                            warn!("daemon not staking anymore, not counting work");
+
+                            // return Ok(());
+                            continue;
+                        }
+                        // add the work up until here
+                        add_work(&active_subscribers, &client, &mut cs, block.height).await?;
+
+                        if let Err(e) = check_for_stake(&block, &active_subscribers, &mut cs).await
+                        {
+                            error!("{:?}\n{:#?}\n{:#?}", e, &block, &active_subscribers);
+                        };
 
                         continue;
                     }
@@ -375,40 +374,35 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     let pool_supply = wallet_info.eligible_staking_balance.as_vrsc();
                     let mining_info = client.get_mining_info()?;
                     let network_supply = mining_info.stakingsupply;
-                    let my_supply;
-                    if let Some(subscriber) = database::get_subscriptions(&cs.pool, discord_user_id)
-                        .await?
-                        .iter()
-                        .find(|sub| sub.currencyid == cs.chain.currencyid)
-                    {
-                        trace!("subscriber found: {subscriber:?}");
+                    // let my_supply;
+                    // if let Some(subscriber) = database::get_subscriptions(&cs.pool, discord_user_id)
+                    //     .await?
+                    //     .iter()
+                    //     .find(|sub| sub.currencyid == cs.chain.currencyid)
+                    // {
+                    //     trace!("subscriber found: {subscriber:?}");
 
-                        let lu = client
-                            .list_unspent(
-                                Some(150),
-                                Some(999999),
-                                Some(&vec![subscriber.identity_address.clone()]),
-                            )?
-                            .iter()
-                            .fold(SignedAmount::ZERO, |acc, sum| acc + sum.amount);
+                    //     let lu = client
+                    //         .list_unspent(
+                    //             Some(150),
+                    //             Some(999999),
+                    //             Some(&vec![subscriber.identity_address.clone()]),
+                    //         )?
+                    //         .iter()
+                    //         .fold(SignedAmount::ZERO, |acc, sum| acc + sum.amount);
 
-                        my_supply = lu.as_vrsc();
-                    } else {
-                        trace!("no subscriber -> not staking -> it's 0.0");
-                        my_supply = 0.0;
-                    }
+                    //     my_supply = lu.as_vrsc();
+                    // } else {
+                    //     trace!("no subscriber -> not staking -> it's 0.0");
+                    //     my_supply = 0.0;
+                    // }
 
-                    if let Err(e) = os_tx.send((network_supply, pool_supply, my_supply)) {
+                    if let Err(e) = os_tx.send((network_supply, pool_supply, 0.0)) {
                         error!("{e:?}");
                     }
 
                     continue;
                 }
-                // CoinStakerMessage::NewAddress(os_tx) => {
-                //     let client = cs.chain.verusd_client()?;
-
-                //     continue;
-                // }
                 CoinStakerMessage::ProcessPayments() => {}
                 CoinStakerMessage::SetFeeDiscount(os_tx, new_fee) => {
                     cs.bot_fee_discount = Decimal::from_f32(new_fee).unwrap_or(Decimal::ZERO);
@@ -462,7 +456,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                         let payload = Payload {
                                             command: "unsubscribed".to_string(),
                                             data: json!({
-                                                "discord_user_id": subscriber.discord_user_id,
                                                 "identity_name": identity.identity.name.clone(),
                                                 "identity_address": identity.identity.identityaddress.clone(),
                                                 "currency_id": cs.chain.currencyid.clone(),
@@ -497,7 +490,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                         let payload = Payload {
                                             command: "subscribed".to_string(),
                                             data: json!({
-                                                "discord_user_id": subscriber.discord_user_id,
                                                 "identity_name": identity.identity.name.clone(),
                                                 "identity_address": identity.identity.identityaddress.clone(),
                                                 "currency_id": cs.chain.currencyid.clone(),
@@ -650,7 +642,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                 &identityaddress,
                                 &fqn,
                                 "pending",
-                                0,
                                 &address.to_string(),
                                 cs.chain.default_bot_fee,
                                 cs.chain.default_min_payout,
@@ -881,7 +872,6 @@ async fn check_subscriptions(
                     let payload = Payload {
                         command: "subscribed".to_string(),
                         data: json!({
-                            "discord_user_id": s.discord_user_id,
                             "identity_name": identityprimary.name.clone(),
                             "identity_address": identityprimary.identityaddress.clone(),
                             "currency_id": cs.chain.currencyid.clone(),
@@ -918,7 +908,7 @@ async fn check_subscriptions(
                 && identityprimary.primaryaddresses.len() > 1
                 && identityprimary
                     .primaryaddresses
-                    .contains(&db_subscriber.bot_address)
+                    .contains(&db_subscriber.pool_address)
             {
                 trace!("the subscription is still ok for the bot")
             } else {
@@ -938,7 +928,6 @@ async fn check_subscriptions(
                     let payload = Payload {
                         command: "unsubscribed".to_string(),
                         data: json!({
-                            "discord_user_id": db_subscriber.discord_user_id,
                             "identity_name": identityprimary.name.clone(),
                             "identity_address": identityprimary.identityaddress.clone(),
                             "currency_id": cs.chain.currencyid.clone(),
