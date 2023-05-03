@@ -53,7 +53,7 @@ pub struct StakeMember {
     pub fee: Decimal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Subscriber {
     pub currencyid: Address,
     pub identity_address: Address,

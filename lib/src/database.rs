@@ -2,11 +2,13 @@ use crate::{payout::Payout, PayoutMember, Stake, StakeMember, StakeResult, Subsc
 use color_eyre::Report;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use sqlx::{
+    postgres::PgRow,
+    query_builder,
     types::{
         chrono::{DateTime, Utc},
         Decimal,
     },
-    PgPool, Postgres, QueryBuilder,
+    Execute, FromRow, PgPool, Postgres, QueryBuilder, Row,
 };
 use std::{collections::HashMap, str::FromStr};
 use tracing::debug;
@@ -83,6 +85,7 @@ pub async fn get_subscriber(
     Ok(None)
 }
 
+// we cannot use multiple currencyids because it would mix up currencids with identityaddresses that don't necessarily belong to the same entity.
 pub async fn get_subscribers(
     pool: &PgPool,
     currencyid: &str,
@@ -179,27 +182,39 @@ pub async fn update_subscriber_min_payout(
     Ok(())
 }
 
-// pub async fn get_subscriptions(pool: &PgPool, user_id: u64) -> Result<Vec<Subscriber>, Report> {
-//     let rows = sqlx::query!(
-//         "SELECT * FROM subscriptions WHERE discord_user_id = $1",
-//         &format!("{}", user_id)
-//     )
-//     .fetch_all(pool)
-//     .await?;
+pub async fn get_subscriptions(
+    pool: &PgPool,
+    tuples: &[(&str, &str)],
+) -> Result<Vec<Subscriber>, Report> {
+    let mut query_builder: QueryBuilder<Postgres> = sqlx::QueryBuilder::new(
+        "SELECT *
+        FROM subscriptions 
+        WHERE (currencyid, identityaddress) IN ",
+    );
 
-//     rows.into_iter()
-//         .map(|row| {
-//             Ok(Subscriber {
-//                 currencyid: Address::from_str(&row.currencyid)?,
-//                 identity_address: Address::from_str(&row.identityaddress)?,
-//                 identity_name: row.identityname,
-//                 bot_address: Address::from_str(&row.pool_address)?,
-//                 min_payout: Amount::from_sat(row.min_payout as u64),
-//                 status: row.status,
-//             })
-//         })
-//         .collect::<Result<Vec<_>, _>>()
-// }
+    query_builder.push_tuples(tuples, |mut b, tuple| {
+        b.push_bind(tuple.0).push_bind(tuple.1);
+    });
+
+    let mut query = query_builder.build();
+    let rows: Vec<PgRow> = query.fetch_all(pool).await?;
+
+    // debug!("{:?}", query.sql());
+
+    let subs = rows
+        .into_iter()
+        .map(|row| Subscriber {
+            currencyid: Address::from_str(row.get("currencyid")).unwrap(),
+            identity_address: Address::from_str(row.get("identityaddress")).unwrap(),
+            identity_name: row.get("identityname"),
+            pool_address: Address::from_str(row.get("pool_address")).unwrap(),
+            min_payout: Amount::from_sat(row.get::<i64, &str>("min_payout") as u64),
+            status: row.get("status"),
+        })
+        .collect::<Vec<_>>();
+
+    Ok(subs)
+}
 
 // pub async fn get_total_paid_out_by_user_id(
 //     pool: &PgPool,
@@ -726,6 +741,25 @@ mod tests {
 
         assert!(inserted_transaction.get::<i64, &str>("amount") == amount as i64);
         assert!(inserted_transaction.get::<Decimal, &str>("shares") == shares);
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[sqlx::test(fixtures("subscriptions"), migrator = "crate::MIGRATOR")]
+    async fn test_get_subscriptions(pool: PgPool) -> sqlx::Result<()> {
+        let subscriptions = get_subscriptions(
+            &pool,
+            &[(
+                "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV",
+                "iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU",
+            )],
+        )
+        .await
+        .unwrap();
+
+        debug!("{:?}", subscriptions);
+        assert!(subscriptions.len() == 1);
 
         Ok(())
     }

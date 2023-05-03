@@ -81,7 +81,7 @@ impl PayoutManager {
             // TODO this could be done as one query, of course
             let subscribers = database::get_subscribers(
                 pool,
-                currencyid,
+                &currencyid,
                 &payout_members_map
                     .keys()
                     .map(|address| address.to_string())

@@ -375,7 +375,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     let mining_info = client.get_mining_info()?;
                     let network_supply = mining_info.stakingsupply;
                     // let my_supply;
-                    // if let Some(subscriber) = database::get_subscriptions(&cs.pool, discord_user_id)
+                    // let subscriptions = database::get_subscriptions(&cs.pool, &[()])
                     //     .await?
                     //     .iter()
                     //     .find(|sub| sub.currencyid == cs.chain.currencyid)
