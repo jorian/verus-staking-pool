@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
 
 use color_eyre::Report;
 use poise::ChoiceParameter;
@@ -15,6 +15,15 @@ pub enum ChainChoice {
     VRSCTEST,
     // GRAVITY,
     // V2,
+}
+
+impl ChainChoice {
+    pub fn currencyid(&self) -> Address {
+        match self {
+            Self::QUANTUM => Address::from_str("iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq").unwrap(),
+            Self::VRSCTEST => Address::from_str("iBDkVJqik6BrtcDBQfFygffiYzTMy6EuhU").unwrap(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
