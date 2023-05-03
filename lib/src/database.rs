@@ -184,7 +184,7 @@ pub async fn update_subscriber_min_payout(
 
 pub async fn get_subscriptions(
     pool: &PgPool,
-    tuples: &[(&str, &str)],
+    tuples: &[(String, String)],
 ) -> Result<Vec<Subscriber>, Report> {
     let mut query_builder: QueryBuilder<Postgres> = sqlx::QueryBuilder::new(
         "SELECT *
@@ -193,13 +193,11 @@ pub async fn get_subscriptions(
     );
 
     query_builder.push_tuples(tuples, |mut b, tuple| {
-        b.push_bind(tuple.0).push_bind(tuple.1);
+        b.push_bind(&tuple.0).push_bind(&tuple.1);
     });
 
-    let mut query = query_builder.build();
+    let query = query_builder.build();
     let rows: Vec<PgRow> = query.fetch_all(pool).await?;
-
-    // debug!("{:?}", query.sql());
 
     let subs = rows
         .into_iter()
@@ -751,8 +749,8 @@ mod tests {
         let subscriptions = get_subscriptions(
             &pool,
             &[(
-                "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV",
-                "iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU",
+                "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV".to_string(),
+                "iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU".to_string(),
             )],
         )
         .await

@@ -368,36 +368,38 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                     continue;
                 }
-                CoinStakerMessage::StakingSupply(os_tx, discord_user_id) => {
+                CoinStakerMessage::StakingSupply(os_tx, tuples) => {
                     let client = cs.chain.verusd_client()?;
                     let wallet_info = client.get_wallet_info()?;
                     let pool_supply = wallet_info.eligible_staking_balance.as_vrsc();
                     let mining_info = client.get_mining_info()?;
                     let network_supply = mining_info.stakingsupply;
-                    // let my_supply;
-                    // let subscriptions = database::get_subscriptions(&cs.pool, &[()])
-                    //     .await?
-                    //     .iter()
-                    //     .find(|sub| sub.currencyid == cs.chain.currencyid)
-                    // {
-                    //     trace!("subscriber found: {subscriber:?}");
+                    let my_supply = if tuples.len() > 0 {
+                        let subscriptions = database::get_subscriptions(&cs.pool, &tuples).await?;
 
-                    //     let lu = client
-                    //         .list_unspent(
-                    //             Some(150),
-                    //             Some(999999),
-                    //             Some(&vec![subscriber.identity_address.clone()]),
-                    //         )?
-                    //         .iter()
-                    //         .fold(SignedAmount::ZERO, |acc, sum| acc + sum.amount);
+                        // for subscriber in subscriptions {
+                        trace!("subscriber found: {subscriptions:?}");
 
-                    //     my_supply = lu.as_vrsc();
-                    // } else {
-                    //     trace!("no subscriber -> not staking -> it's 0.0");
-                    //     my_supply = 0.0;
-                    // }
+                        let lu = client
+                            .list_unspent(
+                                Some(150),
+                                Some(999999),
+                                Some(
+                                    &subscriptions
+                                        .into_iter()
+                                        .map(|sub| sub.identity_address)
+                                        .collect::<Vec<Address>>(),
+                                ),
+                            )?
+                            .iter()
+                            .fold(SignedAmount::ZERO, |acc, sum| acc + sum.amount);
 
-                    if let Err(e) = os_tx.send((network_supply, pool_supply, 0.0)) {
+                        lu.as_vrsc()
+                    } else {
+                        0.0
+                    };
+
+                    if let Err(e) = os_tx.send((network_supply, pool_supply, my_supply)) {
                         error!("{e:?}");
                     }
 
@@ -672,7 +674,7 @@ pub enum CoinStakerMessage {
     BlockNotify(BlockHash),
     StaleBlock(Stake),
     MaturedBlock(Stake),
-    StakingSupply(oneshot::Sender<(f64, f64, f64)>, u64),
+    StakingSupply(oneshot::Sender<(f64, f64, f64)>, Vec<(String, String)>),
     SetFeeDiscount(oneshot::Sender<f32>, f32),
     // NewAddress(oneshot::Sender<Address>),
     ProcessPayments(),
