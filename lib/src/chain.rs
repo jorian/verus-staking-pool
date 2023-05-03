@@ -20,8 +20,8 @@ pub enum ChainChoice {
 impl ChainChoice {
     pub fn currencyid(&self) -> Address {
         match self {
-            Self::QUANTUM => Address::from_str("iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq").unwrap(),
-            Self::VRSCTEST => Address::from_str("iBDkVJqik6BrtcDBQfFygffiYzTMy6EuhU").unwrap(),
+            Self::QUANTUM => Address::from_str("iBDkVJqik6BrtcDBQfFygffiYzTMy6EuhU").unwrap(),
+            Self::VRSCTEST => Address::from_str("iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq").unwrap(),
         }
     }
 }

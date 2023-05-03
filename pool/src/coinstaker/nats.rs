@@ -3,7 +3,7 @@ use futures::StreamExt;
 use poollib::{Payload, Stake, Subscriber};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, trace};
 use vrsc_rpc::json::{identity::Identity, vrsc::Address};
 
 use super::CoinStakerMessage;
@@ -55,7 +55,7 @@ pub async fn nats_server(
                                 .send(CoinStakerMessage::SetStaking(os_tx, generate))
                                 .await?;
 
-                            if let Ok(res) = os_rx.await {
+                            if let Ok(_res) = os_rx.await {
                                 client
                                     .publish(
                                         reply,
@@ -85,7 +85,20 @@ pub async fn nats_server(
                                 ))
                                 .await?;
 
-                            let resp = os_rx.await?;
+                            match os_rx.await? {
+                                Ok(sub) => {
+                                    let serde_str = serde_json::to_string(&sub)?;
+                                    client.publish(reply, serde_str.into()).await?
+                                }
+                                Err(e) => {
+                                    client
+                                        .publish(
+                                            reply,
+                                            json!({ "error": format!("{}", e) }).to_string().into(),
+                                        )
+                                        .await?;
+                                }
+                            }
                         }
                         // it takes the current currencyid as the currencyid in the database call.
                         "getsubscriptions" => {

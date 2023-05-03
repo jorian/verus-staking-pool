@@ -406,11 +406,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                 }
                 // CoinStakerMessage::NewAddress(os_tx) => {
                 //     let client = cs.chain.verusd_client()?;
-                //     if let Ok(address) = client.get_new_address() {
-                //         if let Err(e) = os_tx.send(address) {
-                //             error!("{e:?}");
-                //         }
-                //     }
 
                 //     continue;
                 // }
@@ -623,9 +618,54 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     os_tx.send(()).unwrap();
                 }
                 CoinStakerMessage::NewSubscriber(os_tx, identityaddress) => {
-                    os_tx
-                        .send(Err(CoinStakerError::SubscriberAlreadyExists.into()))
-                        .unwrap();
+                    if let Some(existing_subscriber) = database::get_subscriber(
+                        &cs.pool,
+                        &cs.chain.currencyid.to_string(),
+                        &identityaddress,
+                    )
+                    .await?
+                    {
+                        debug!("{existing_subscriber:#?}");
+                        if ["unsubscribed", "pending", ""].contains(&&*existing_subscriber.status) {
+                            trace!("use existing address if user is still pending or is unsubscribed or has no status");
+                            os_tx.send(Ok(existing_subscriber)).unwrap();
+                        } else {
+                            trace!("the user has an active subscription");
+
+                            os_tx
+                                .send(Err(CoinStakerError::SubscriberAlreadyExists.into()))
+                                .unwrap();
+                        }
+                    } else {
+                        trace!("get new pool address for new subscriber");
+
+                        let fqn = client.get_identity(&identityaddress)?.fullyqualifiedname;
+
+                        if let Ok(address) = client.get_new_address() {
+                            debug!("new address: {address:?}");
+
+                            let new_subscriber = database::insert_subscriber(
+                                &cs.pool,
+                                &cs.chain.currencyid.to_string(),
+                                &identityaddress,
+                                &fqn,
+                                "pending",
+                                0,
+                                &address.to_string(),
+                                cs.chain.default_bot_fee,
+                                cs.chain.default_min_payout,
+                            )
+                            .await?;
+
+                            os_tx.send(Ok(new_subscriber)).unwrap();
+                        }
+                    }
+
+                    // get any subscriber for this address from the db.
+                    // if it exists, check if it is still pending
+                    // if it is pending, return
+                    // if it is unsubscribed, set to pending and return
+                    // it is subscribed, return error
                 }
             }
         }

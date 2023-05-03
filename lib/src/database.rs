@@ -26,16 +26,17 @@ pub async fn insert_subscriber(
     bot_address: &str,
     fee: f32,
     min_payout: u64,
-) -> Result<(), Report> {
+) -> Result<Subscriber, Report> {
     let fee = Decimal::from_f32(fee).unwrap_or(Decimal::ZERO);
 
-    sqlx::query!(
+    let row = sqlx::query!(
         "INSERT INTO subscriptions(
             currencyid, identityaddress, identityname, status, discord_user_id, botaddress, fee, min_payout
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (currencyid, identityaddress) DO
         UPDATE SET status = $4
-        WHERE subscriptions.identityaddress = EXCLUDED.identityaddress AND subscriptions.status = 'unsubscribed'",
+        WHERE subscriptions.identityaddress = EXCLUDED.identityaddress AND subscriptions.status = 'unsubscribed'
+        RETURNING *",
         currencyid,
         identity_address,
         identity_name,
@@ -45,10 +46,18 @@ pub async fn insert_subscriber(
         fee,
         min_payout as i64
     )
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
 
-    Ok(())
+    Ok(Subscriber {
+        currencyid: Address::from_str(&row.currencyid)?,
+        identity_address: Address::from_str(&row.identityaddress)?,
+        identity_name: row.identityname,
+        discord_user_id: row.discord_user_id.parse::<u64>()?,
+        bot_address: Address::from_str(&row.botaddress)?,
+        status: row.status.unwrap_or(String::new()),
+        min_payout: Amount::from_sat(row.min_payout as u64),
+    })
 }
 
 pub async fn get_subscriber(

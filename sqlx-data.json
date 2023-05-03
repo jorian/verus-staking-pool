@@ -203,6 +203,87 @@
     },
     "query": "SELECT * \n        FROM stakes \n        WHERE currencyid = $1 AND created_at > $2"
   },
+  "2886aeb676dc39cb29d5d4f3dda6b0819bac2e44942d39741506f052f726fc5e": {
+    "describe": {
+      "columns": [
+        {
+          "name": "identityaddress",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "identityname",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "status",
+          "ordinal": 2,
+          "type_info": "Text"
+        },
+        {
+          "name": "discord_user_id",
+          "ordinal": 3,
+          "type_info": "Text"
+        },
+        {
+          "name": "created_at",
+          "ordinal": 4,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "updated_at",
+          "ordinal": 5,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "currencyid",
+          "ordinal": 6,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "botaddress",
+          "ordinal": 7,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "fee",
+          "ordinal": 8,
+          "type_info": "Numeric"
+        },
+        {
+          "name": "min_payout",
+          "ordinal": 9,
+          "type_info": "Int8"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Varchar",
+          "Varchar",
+          "Text",
+          "Text",
+          "Text",
+          "Varchar",
+          "Numeric",
+          "Int8"
+        ]
+      }
+    },
+    "query": "INSERT INTO subscriptions(\n            currencyid, identityaddress, identityname, status, discord_user_id, botaddress, fee, min_payout\n        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        ON CONFLICT (currencyid, identityaddress) DO\n        UPDATE SET status = $4\n        WHERE subscriptions.identityaddress = EXCLUDED.identityaddress AND subscriptions.status = 'unsubscribed'\n        RETURNING *"
+  },
   "2a9c8474af71ffc5f255ad9cd970dadca071cd0cbd3b66f2396e2becabbca8b4": {
     "describe": {
       "columns": [],
@@ -234,25 +315,6 @@
       }
     },
     "query": "SELECT txid FROM transactions"
-  },
-  "3cb70003d7dfd1a92a92d432c012917c6f047abe3c842b273976139bc07fc714": {
-    "describe": {
-      "columns": [],
-      "nullable": [],
-      "parameters": {
-        "Left": [
-          "Varchar",
-          "Varchar",
-          "Text",
-          "Text",
-          "Text",
-          "Varchar",
-          "Numeric",
-          "Int8"
-        ]
-      }
-    },
-    "query": "INSERT INTO subscriptions(\n            currencyid, identityaddress, identityname, status, discord_user_id, botaddress, fee, min_payout\n        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        ON CONFLICT (currencyid, identityaddress) DO\n        UPDATE SET status = $4\n        WHERE subscriptions.identityaddress = EXCLUDED.identityaddress AND subscriptions.status = 'unsubscribed'"
   },
   "49f079ba7c50a652fbc1d5fb35bf3930bf1d7d63f69564e9646fbf1286040ddc": {
     "describe": {
