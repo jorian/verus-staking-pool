@@ -584,56 +584,65 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                     os_tx.send(()).unwrap();
                 }
-                CoinStakerMessage::NewSubscriber(os_tx, identityaddress) => {
-                    if let Some(existing_subscriber) = database::get_subscriber(
-                        &cs.pool,
-                        &cs.chain.currencyid.to_string(),
-                        &identityaddress,
-                    )
-                    .await?
-                    {
-                        debug!("{existing_subscriber:#?}");
-                        if ["unsubscribed", "pending", ""].contains(&&*existing_subscriber.status) {
-                            trace!("use existing address if user is still pending or is unsubscribed or has no status");
-                            trace!("update db, set subscriber status to pending");
-
-                            database::update_subscriber_status(
+                CoinStakerMessage::NewSubscriber(os_tx, identitystr) => {
+                    match client.get_identity(&identitystr) {
+                        Ok(identity) => {
+                            if let Some(existing_subscriber) = database::get_subscriber(
                                 &cs.pool,
                                 &cs.chain.currencyid.to_string(),
-                                &identityaddress,
-                                "pending",
+                                &identity.identity.identityaddress.to_string(),
                             )
-                            .await?;
+                            .await?
+                            {
+                                debug!("{existing_subscriber:#?}");
+                                if ["unsubscribed", "pending", ""]
+                                    .contains(&&*existing_subscriber.status)
+                                {
+                                    trace!("use existing address if user is still pending or is unsubscribed or has no status");
+                                    trace!("update db, set subscriber status to pending");
 
-                            os_tx.send(Ok(existing_subscriber)).unwrap();
-                        } else {
-                            trace!("the user has an active subscription");
+                                    database::update_subscriber_status(
+                                        &cs.pool,
+                                        &cs.chain.currencyid.to_string(),
+                                        &identity.identity.identityaddress.to_string(),
+                                        "pending",
+                                    )
+                                    .await?;
 
-                            os_tx
-                                .send(Err(CoinStakerError::SubscriberAlreadyExists.into()))
-                                .unwrap();
+                                    os_tx.send(Ok(existing_subscriber)).unwrap();
+                                } else {
+                                    trace!("the user has an active subscription");
+
+                                    os_tx
+                                        .send(Err(CoinStakerError::SubscriberAlreadyExists.into()))
+                                        .unwrap();
+                                }
+                            } else {
+                                trace!("get new pool address for new subscriber");
+
+                                if let Ok(address) = client.get_new_address() {
+                                    debug!("new address: {address:?}");
+
+                                    let new_subscriber = database::insert_subscriber(
+                                        &cs.pool,
+                                        &cs.chain.currencyid.to_string(),
+                                        &identity.identity.identityaddress.to_string(),
+                                        &identity.fullyqualifiedname,
+                                        "pending",
+                                        &address.to_string(),
+                                        cs.chain.default_bot_fee,
+                                        cs.chain.default_min_payout,
+                                    )
+                                    .await?;
+
+                                    os_tx.send(Ok(new_subscriber)).unwrap();
+                                }
+                            }
                         }
-                    } else {
-                        trace!("get new pool address for new subscriber");
-
-                        let fqn = client.get_identity(&identityaddress)?.fullyqualifiedname;
-
-                        if let Ok(address) = client.get_new_address() {
-                            debug!("new address: {address:?}");
-
-                            let new_subscriber = database::insert_subscriber(
-                                &cs.pool,
-                                &cs.chain.currencyid.to_string(),
-                                &identityaddress,
-                                &fqn,
-                                "pending",
-                                &address.to_string(),
-                                cs.chain.default_bot_fee,
-                                cs.chain.default_min_payout,
-                            )
-                            .await?;
-
-                            os_tx.send(Ok(new_subscriber)).unwrap();
+                        Err(e) => {
+                            os_tx
+                                .send(Err(CoinStakerError::IdentityNotValid.into()))
+                                .unwrap();
                         }
                     }
                 }
@@ -662,7 +671,7 @@ pub enum CoinStakerMessage {
     Heartbeat(oneshot::Sender<()>),
     GetSubscriptions(oneshot::Sender<Vec<Subscriber>>, Vec<String>),
     SetStaking(oneshot::Sender<()>, bool),
-    NewSubscriber(oneshot::Sender<Result<Subscriber, Report>>, String),
+    NewSubscriber(oneshot::Sender<Result<Subscriber, CoinStakerError>>, String),
 }
 
 async fn tmq_block_listen(

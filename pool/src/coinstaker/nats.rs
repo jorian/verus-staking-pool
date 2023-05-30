@@ -4,7 +4,12 @@ use poollib::{Payload, Stake, Subscriber};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, trace};
-use vrsc_rpc::json::{identity::Identity, vrsc::Address};
+use vrsc_rpc::{
+    json::{identity::Identity, vrsc::Address},
+    jsonrpc::error::RpcError,
+};
+
+use crate::coinstaker::error::CoinStakerError;
 
 use super::CoinStakerMessage;
 
@@ -74,14 +79,14 @@ pub async fn nats_server(
                         // creates a new pending subscriber if it doesn't exist, and returns the subscriber object.
                         // fails if the identityaddress already is an active subscriber on this currencyid.
                         "newpendingsubscriber" => {
-                            let (os_tx, os_rx) = oneshot::channel::<Result<Subscriber, Report>>();
-                            let identityaddress: &str =
-                                payload.data["identityaddress"].as_str().unwrap(); // TODO return error if missing
+                            let (os_tx, os_rx) =
+                                oneshot::channel::<Result<Subscriber, CoinStakerError>>();
+                            let identitystr: &str = payload.data["identitystr"].as_str().unwrap(); // TODO return error if missing
 
                             cs_tx
                                 .send(CoinStakerMessage::NewSubscriber(
                                     os_tx,
-                                    identityaddress.to_owned(),
+                                    identitystr.to_owned(),
                                 ))
                                 .await?;
 
@@ -91,10 +96,14 @@ pub async fn nats_server(
                                     client.publish(reply, serde_str.into()).await?
                                 }
                                 Err(e) => {
+                                    let message = match e {
+                                        CoinStakerError::IdentityNotValid => format!("Identity parameter must be valid friendly name or identity address: {}", identitystr),
+                                        CoinStakerError::SubscriberAlreadyExists => format!("This identity is already a subscriber: {} on {}", identitystr, currencyid.to_string() )
+                                    };
                                     client
                                         .publish(
                                             reply,
-                                            json!({ "error": format!("{}", e) }).to_string().into(),
+                                            json!({ "error": message }).to_string().into(),
                                         )
                                         .await?;
                                 }
