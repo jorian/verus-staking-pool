@@ -84,7 +84,7 @@ pub async fn get_subscriber(
     Ok(None)
 }
 
-// we cannot use multiple currencyids because it would mix up currencids with identityaddresses that don't necessarily belong to the same entity.
+// we cannot use multiple currencyids because it would mix up currencyids with identityaddresses that don't necessarily belong to the same entity.
 pub async fn get_subscribers(
     pool: &PgPool,
     currencyid: &str,

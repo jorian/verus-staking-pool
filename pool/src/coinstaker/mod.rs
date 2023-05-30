@@ -431,7 +431,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                         let payload = Payload {
                                             command: "unsubscribed".to_string(),
                                             data: json!({
-                                                "identity_name": identity.identity.name.clone(),
+                                                "identity_name": identity.fullyqualifiedname.clone(),
                                                 "identity_address": identity.identity.identityaddress.clone(),
                                                 "currency_id": cs.chain.currencyid.clone(),
                                                 "currency_name": cs.chain.name
