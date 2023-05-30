@@ -350,8 +350,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     let my_supply = if tuples.len() > 0 {
                         let subscriptions = database::get_subscriptions(&cs.pool, &tuples).await?;
 
-                        // for subscriber in subscriptions {
-                        trace!("subscriber found: {subscriptions:?}");
+                        trace!("subscriptions found: {subscriptions:#?}");
 
                         let lu = client
                             .list_unspent(
@@ -360,6 +359,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                 Some(
                                     &subscriptions
                                         .into_iter()
+                                        .filter(|s| &s.status == "subscribed")
                                         .map(|sub| sub.identity_address)
                                         .collect::<Vec<Address>>(),
                                 ),
