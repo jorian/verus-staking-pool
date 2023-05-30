@@ -3,12 +3,11 @@ use color_eyre::Report;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use sqlx::{
     postgres::PgRow,
-    query_builder,
     types::{
         chrono::{DateTime, Utc},
         Decimal,
     },
-    Execute, FromRow, PgPool, Postgres, QueryBuilder, Row,
+    PgPool, Postgres, QueryBuilder, Row,
 };
 use std::{collections::HashMap, str::FromStr};
 use tracing::debug;

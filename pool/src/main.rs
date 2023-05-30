@@ -35,9 +35,7 @@ pub struct CSM {
 }
 
 impl CSM {
-    async fn start(
-        &mut self, /*mut s_rx: UnboundedReceiver<IPCServerMessage>*/
-    ) -> Result<(), Report> {
+    async fn start(&mut self) -> Result<(), Report> {
         info!("starting csm");
 
         let config = get_app_config().await?;
