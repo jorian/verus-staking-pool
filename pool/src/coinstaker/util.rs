@@ -179,7 +179,7 @@ pub async fn check_subscriptions(
         debug!("identityprimary: {identityprimary:#?}");
 
         let client = cs.chain.verusd_client()?;
-        if let Ok(identity) = client.get_identity(&identityprimary.name) {
+        if let Ok(identity) = client.get_identity(&identityprimary.identityaddress.to_string()) {
             debug!("identity: {identity:?}");
 
             // check if the vout contains an update to an identity that is known to the staking pool:
@@ -274,6 +274,11 @@ pub async fn check_subscriptions(
                     }
                 }
             }
+        } else {
+            error!(
+                "could not get identity: {}",
+                &identityprimary.identityaddress.to_string()
+            )
         }
     }
     Ok(())
