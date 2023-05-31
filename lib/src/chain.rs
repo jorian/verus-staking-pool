@@ -24,6 +24,13 @@ impl ChainChoice {
             Self::VRSCTEST => Address::from_str("iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq").unwrap(),
         }
     }
+
+    pub fn currencyidhex(&self) -> String {
+        match self {
+            Self::QUANTUM => String::from("3e76382e8354715b3f0be56608c112174baaf554"),
+            Self::VRSCTEST => String::from("2d4eb6919e9fdb2934ff2481325e6335a29eefa6"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
