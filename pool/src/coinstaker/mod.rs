@@ -152,8 +152,16 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             latest_blockheight += 1;
 
             let current_blockheight = client.get_blockchain_info()?.blocks;
+            let c_tx = cs.get_mpsc_sender();
 
             for i in latest_blockheight.try_into()?..=current_blockheight {
+                let pending_subscribers = database::get_subscribers_by_status(
+                    &cs.pool,
+                    &cs.chain.currencyid.to_string(),
+                    "pending",
+                )
+                .await?;
+
                 let active_subscribers = database::get_subscribers_by_status(
                     &cs.pool,
                     &cs.chain.currencyid.to_string(),
@@ -165,7 +173,13 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                 for tx in block.tx.iter() {
                     for vout in tx.vout.iter() {
-                        util::check_subscriptions(&mut cs, vout, &active_subscribers).await?;
+                        util::check_subscriptions(
+                            &mut cs,
+                            vout,
+                            &active_subscribers,
+                            &pending_subscribers,
+                        )
+                        .await?;
                     }
                 }
             }
@@ -229,13 +243,25 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         )
                         .await?;
 
+                        let pending_subscribers = database::get_subscribers_by_status(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                            "pending",
+                        )
+                        .await?;
+
                         // get additional information about the incoming block:
                         let block = client.get_block(&blockhash, 2)?;
 
                         for tx in block.tx.iter() {
                             for vout in tx.vout.iter() {
-                                util::check_subscriptions(&mut cs, vout, &active_subscribers)
-                                    .await?;
+                                util::check_subscriptions(
+                                    &mut cs,
+                                    vout,
+                                    &active_subscribers,
+                                    &pending_subscribers,
+                                )
+                                .await?;
                             }
                         }
 
@@ -416,7 +442,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                         os_tx
                                             .send(json!({
                                                 "result":
-                                                    format!("{s_id} has an active subscription and a valid identity")
+                                                    format!("{s_id} has an active subscription and a valid identity\n{:#?}", identity)
                                             }))
                                             .unwrap();
                                     } else {

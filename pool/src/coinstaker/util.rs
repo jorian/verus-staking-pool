@@ -166,113 +166,112 @@ pub async fn check_for_stake(
     Ok(())
 }
 
+//
 pub async fn check_subscriptions(
     cs: &mut CoinStaker,
     vout: &TransactionVout,
     active_subscribers: &[Subscriber],
+    pending_subscribers: &[Subscriber],
 ) -> Result<(), Report> {
+    debug!("vout: {:#?}", &vout);
+
     if let Some(identityprimary) = &vout.script_pubkey.identityprimary {
-        debug!("{:#?}", &vout);
-        debug!("{identityprimary:#?}");
+        debug!("identityprimary: {identityprimary:#?}");
 
-        let pending_subscribers = database::get_subscribers_by_status(
-            &cs.pool,
-            &cs.chain.currencyid.to_string(),
-            "pending",
-        )
-        .await?;
+        let client = cs.chain.verusd_client()?;
+        if let Ok(identity) = client.get_identity(&identityprimary.name) {
+            debug!("identity: {identity:?}");
 
-        if let Some(s) = pending_subscribers.iter().find(|db_subscriber| {
-            db_subscriber.identity_address == identityprimary.identityaddress
-                && db_subscriber.currencyid == cs.chain.currencyid
-        }) {
-            trace!("pending subscriber found: {s:?}");
-
-            if cs.identity_is_eligible(&identityprimary, &s) {
-                trace!("bot address found in primary addresses, the subscriber is eligible and can be made active");
-                if database::update_subscriber_status(
-                    &cs.pool,
-                    &cs.chain.currencyid.to_string(),
-                    &identityprimary.identityaddress.to_string(),
-                    "subscribed",
-                )
-                .await
-                .is_ok()
-                {
-                    trace!("db updated, send message to discord");
-
-                    let payload = Payload {
-                        command: "subscribed".to_string(),
-                        data: json!({
-                            "identity_name": identityprimary.name.clone(),
-                            "identity_address": identityprimary.identityaddress.clone(),
-                            "currency_id": cs.chain.currencyid.clone(),
-                            "currency_name": cs.chain.name
-                        }),
-                    };
-
-                    cs.nats_client
-                        .publish(
-                            "ipc.coinstaker".into(),
-                            serde_json::to_vec(&json!(payload))?.into(),
-                        )
-                        .await?;
-                }
-            } else {
+            // check if the vout contains an update to an identity that is known to the staking pool:
+            if let Some(s) = pending_subscribers.iter().find(|db_subscriber| {
+                db_subscriber.identity_address == identityprimary.identityaddress
+                    && db_subscriber.currencyid == cs.chain.currencyid
+            }) {
                 trace!(
+                    "an update to an identity of a registered pending subscriber was found: {s:?}"
+                );
+
+                if cs.identity_is_eligible(&identityprimary, &s) {
+                    trace!("pool address found in primary addresses, the subscriber is eligible and can be made active");
+                    if database::update_subscriber_status(
+                        &cs.pool,
+                        &cs.chain.currencyid.to_string(),
+                        &identityprimary.identityaddress.to_string(),
+                        "subscribed",
+                    )
+                    .await
+                    .is_ok()
+                    {
+                        trace!("db updated, send message to discord");
+
+                        let payload = Payload {
+                            command: "subscribed".to_string(),
+                            data: json!({
+                                "identity_name": identity.fullyqualifiedname.clone(),
+                                "identity_address": identityprimary.identityaddress.clone(),
+                                "currency_id": cs.chain.currencyid.clone(),
+                                "currency_name": cs.chain.name
+                            }),
+                        };
+
+                        cs.nats_client
+                            .publish(
+                                "ipc.coinstaker".into(),
+                                serde_json::to_vec(&json!(payload))?.into(),
+                            )
+                            .await?;
+                    }
+                } else {
+                    trace!(
                     "a pending subscriber changed its ID but did not meet the requirements: {:#?}",
                     identityprimary
                 );
+                }
+
+                return Ok(());
             }
 
-            return Ok(());
-        }
+            // check if active subscriber unsubscribed from specific chain
+            if let Some(db_subscriber) = active_subscribers.iter().find(|db_subscriber| {
+                db_subscriber.identity_address == identityprimary.identityaddress
+                    && db_subscriber.currencyid == cs.chain.currencyid
+            }) {
+                trace!("an active subscriber has changed its identity");
+                // need to check if the primary address is still the same as the bot's
+                // need to check if the minimumsignatures is 1
+                // need to check if the len is more than 1
+                if cs.identity_is_eligible(&identityprimary, db_subscriber) {
+                    trace!("the subscription is still ok for the bot")
+                } else {
+                    trace!("the subscription is not ok, we need to unsubscribe the user");
 
-        // check if active subscriber unsubscribed from specific chain
-        if let Some(db_subscriber) = active_subscribers.iter().find(|db_subscriber| {
-            db_subscriber.identity_address == identityprimary.identityaddress
-                && db_subscriber.currencyid == cs.chain.currencyid
-        }) {
-            trace!("an active subscriber has changed its identity");
-            // need to check if the primary address is still the same as the bot's
-            // need to check if the minimumsignatures is 1
-            // need to check if the len is more than 1
-            if identityprimary.minimumsignatures == 1
-                && identityprimary.primaryaddresses.len() > 1
-                && identityprimary
-                    .primaryaddresses
-                    .contains(&db_subscriber.pool_address)
-            {
-                trace!("the subscription is still ok for the bot")
-            } else {
-                trace!("the subscription is not ok, we need to unsubscribe the user");
+                    if database::update_subscriber_status(
+                        &cs.pool,
+                        &cs.chain.currencyid.to_string(),
+                        &identityprimary.identityaddress.to_string(),
+                        "unsubscribed",
+                    )
+                    .await
+                    .is_ok()
+                    {
+                        trace!("db updated, send message to discord");
 
-                if database::update_subscriber_status(
-                    &cs.pool,
-                    &cs.chain.currencyid.to_string(),
-                    &identityprimary.identityaddress.to_string(),
-                    "unsubscribed",
-                )
-                .await
-                .is_ok()
-                {
-                    trace!("db updated, send message to discord");
-
-                    let payload = Payload {
-                        command: "unsubscribed".to_string(),
-                        data: json!({
-                            "identity_name": identityprimary.name.clone(),
-                            "identity_address": identityprimary.identityaddress.clone(),
-                            "currency_id": cs.chain.currencyid.clone(),
-                            "currency_name": cs.chain.name
-                        }),
-                    };
-                    cs.nats_client
-                        .publish(
-                            "ipc.coinstaker".into(),
-                            serde_json::to_vec(&json!(payload))?.into(),
-                        )
-                        .await?;
+                        let payload = Payload {
+                            command: "unsubscribed".to_string(),
+                            data: json!({
+                                "identity_name": identity.fullyqualifiedname.clone(),
+                                "identity_address": identityprimary.identityaddress.clone(),
+                                "currency_id": cs.chain.currencyid.clone(),
+                                "currency_name": cs.chain.name
+                            }),
+                        };
+                        cs.nats_client
+                            .publish(
+                                "ipc.coinstaker".into(),
+                                serde_json::to_vec(&json!(payload))?.into(),
+                            )
+                            .await?;
+                    }
                 }
             }
         }
