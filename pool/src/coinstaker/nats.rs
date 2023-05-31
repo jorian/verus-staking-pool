@@ -4,10 +4,7 @@ use poollib::{Payload, Stake, Subscriber};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, trace};
-use vrsc_rpc::{
-    json::{identity::Identity, vrsc::Address},
-    jsonrpc::error::RpcError,
-};
+use vrsc_rpc::json::{identity::Identity, vrsc::Address};
 
 use crate::coinstaker::error::CoinStakerError;
 

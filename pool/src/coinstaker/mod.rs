@@ -152,7 +152,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             latest_blockheight += 1;
 
             let current_blockheight = client.get_blockchain_info()?.blocks;
-            let c_tx = cs.get_mpsc_sender();
 
             for i in latest_blockheight.try_into()?..=current_blockheight {
                 let pending_subscribers = database::get_subscribers_by_status(
@@ -665,7 +664,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                 }
                             }
                         }
-                        Err(e) => {
+                        Err(_e) => {
                             os_tx
                                 .send(Err(CoinStakerError::IdentityNotValid.into()))
                                 .unwrap();

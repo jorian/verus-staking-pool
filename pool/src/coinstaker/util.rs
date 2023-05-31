@@ -173,8 +173,6 @@ pub async fn check_subscriptions(
     active_subscribers: &[Subscriber],
     pending_subscribers: &[Subscriber],
 ) -> Result<(), Report> {
-    debug!("vout: {:#?}", &vout);
-
     if let Some(identityprimary) = &vout.script_pubkey.identityprimary {
         debug!("identityprimary: {identityprimary:#?}");
 
