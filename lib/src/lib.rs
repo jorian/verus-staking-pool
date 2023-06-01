@@ -18,7 +18,7 @@ pub mod payout;
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../migrations");
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayoutMember {
     pub blockhash: BlockHash,
     pub identityaddress: Address,

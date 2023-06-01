@@ -295,7 +295,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     stake.set_result("stale")?;
 
                     // need to update postgres
-                    database::set_stake_to_processed(&cs.pool, &stake).await?;
+                    database::set_stake_result(&cs.pool, &stake).await?;
 
                     let payload = Payload {
                         command: "stale".to_string(),
@@ -316,7 +316,8 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                 CoinStakerMessage::MaturedBlock(mut stake) => {
                     stake.set_result("mature")?;
 
-                    database::set_stake_to_processed(&cs.pool, &stake).await?;
+                    // set the stake to processed, as the wait for maturity is over.
+                    database::set_stake_result(&cs.pool, &stake).await?;
 
                     tokio::spawn({
                         let pool = cs.pool.clone();

@@ -27,6 +27,7 @@ impl PayoutManager {
         bot_fee_discount: Decimal,
         bot_identity_address: Address,
     ) -> Result<Payout, Report> {
+        // need to gather the work that belongs to this blockheight in order to do the calculation
         let work = database::get_work_and_fee_by_round(
             &pool,
             &stake.currencyid.to_string(),

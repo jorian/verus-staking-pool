@@ -258,7 +258,39 @@ pub async fn insert_stake(pool: &PgPool, stake: &Stake) -> Result<(), Report> {
     Ok(())
 }
 
-pub async fn set_stake_to_processed(pool: &PgPool, stake: &Stake) -> Result<(), Report> {
+pub async fn get_stake(
+    pool: &PgPool,
+    currencyid: &str,
+    blockheight: i64,
+) -> Result<Option<Stake>, Report> {
+    let opt_row = sqlx::query!(
+        "SELECT * 
+        FROM stakes
+        WHERE currencyid = $1 AND blockheight = $2",
+        currencyid,
+        blockheight
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(row) = opt_row {
+        return Ok(Some(Stake::new(
+            Address::from_str(&row.currencyid).unwrap(),
+            BlockHash::from_str(&row.blockhash).unwrap(),
+            Address::from_str(&row.mined_by).unwrap(),
+            Txid::from_str(&row.pos_source_txid).unwrap(),
+            row.pos_source_vout_num as u16,
+            Amount::from_sat(row.pos_source_amount.try_into().unwrap()),
+            StakeResult::from_str(&row.result.unwrap_or(String::new())).unwrap(),
+            Amount::from_sat(row.amount.try_into().unwrap()),
+            row.blockheight as u64,
+        )));
+    } else {
+        return Ok(None);
+    }
+}
+
+pub async fn set_stake_result(pool: &PgPool, stake: &Stake) -> Result<(), Report> {
     sqlx::query!(
         "UPDATE stakes SET status = 'processed', result = $1 WHERE currencyid = $2 AND blockhash = $3",
         &stake.result.to_string(),

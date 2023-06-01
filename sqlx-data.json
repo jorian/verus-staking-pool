@@ -1,5 +1,92 @@
 {
   "db": "PostgreSQL",
+  "03c434ca02a41d177242a3257ec33201ba1fbdc59d81ac0ce03fa92ed57bace9": {
+    "describe": {
+      "columns": [
+        {
+          "name": "currencyid",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "status",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "result",
+          "ordinal": 2,
+          "type_info": "Text"
+        },
+        {
+          "name": "created_at",
+          "ordinal": 3,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "updated_at",
+          "ordinal": 4,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "mined_by",
+          "ordinal": 5,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "amount",
+          "ordinal": 6,
+          "type_info": "Int8"
+        },
+        {
+          "name": "blockheight",
+          "ordinal": 7,
+          "type_info": "Int8"
+        },
+        {
+          "name": "blockhash",
+          "ordinal": 8,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "pos_source_txid",
+          "ordinal": 9,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "pos_source_vout_num",
+          "ordinal": 10,
+          "type_info": "Int2"
+        },
+        {
+          "name": "pos_source_amount",
+          "ordinal": 11,
+          "type_info": "Int8"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Text",
+          "Int8"
+        ]
+      }
+    },
+    "query": "SELECT * \n        FROM stakes\n        WHERE currencyid = $1 AND blockheight = $2"
+  },
   "083ea866a75dbb57350829e59349d70ea2798b6e6571c1d58e32fe1b7a9ee163": {
     "describe": {
       "columns": [],

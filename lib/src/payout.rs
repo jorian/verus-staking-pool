@@ -36,6 +36,7 @@ impl Payout {
         bot_identity_address: Address,
     ) -> Result<Self, Report> {
         let mut amount = stake.amount;
+        // TODO get this from config
         let mut bot_fee_amount = Amount::ZERO;
 
         // sum could get pretty large, so we need to work with a bigger number:
@@ -77,8 +78,8 @@ impl Payout {
 
             let mut shared_amount_minus_fee = shared_amount_minus_fee
                 .round_dp_with_strategy(8, rust_decimal::RoundingStrategy::ToZero);
-            shared_amount_minus_fee.rescale(8);
 
+            shared_amount_minus_fee.rescale(8);
             fee_amount.rescale(8);
 
             payout_members.push(PayoutMember {
@@ -98,14 +99,13 @@ impl Payout {
         debug!("{final_calc_sum:#?}");
         debug!("{}", amount.as_sat());
 
-        if let Some(leftovers) = amount.checked_sub(final_calc_sum) {
-            if leftovers > Amount::ZERO {
+        if let Some(pool_fee) = amount.checked_sub(final_calc_sum) {
+            if pool_fee > Amount::ZERO {
                 trace!(
-                    "leftovers: the payout is lower, cannot divide amount evenly over participants"
+                    "pool_fee: there is a difference of {pool_fee} between the staked amount and the amount to pay out"
                 );
-                debug!("leftovers: {leftovers}");
 
-                bot_fee_amount += leftovers;
+                bot_fee_amount += pool_fee;
             }
         }
 
@@ -166,95 +166,218 @@ impl Display for PayoutError {
         }
     }
 }
-/*
+
 #[cfg(test)]
 mod tests {
+    use sqlx::PgPool;
     use std::str::FromStr;
     use tracing_test::traced_test;
-    use vrsc_rpc::Auth;
+    use vrsc_rpc::{bitcoin::Txid, Auth, Client};
+
+    use crate::{database, StakeResult};
 
     use super::*;
-    fn client() -> Client {
-        Client::vrsc(false, Auth::ConfigFile).expect("a client")
-    }
+    // fn client() -> Client {
+    //     Client::vrsc(false, Auth::ConfigFile).expect("a client")
+    // }
 
     const _VRSC: &str = "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV";
     const _VRSCTEST: &str = "iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq";
     const ALICE: &str = "iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU";
     const BOB: &str = "iGLN3bFv6uY2HAgQgVwiGriTRgQmTyJrwi";
     const CHARLIE: &str = "RDebEHgiTFDRDUN5Uisx7ntUuRdRJHt6SK";
-    const DIRK: &str = "RSTWA7QcQaEbhS4iJha2p1b5eYvUPpVXGP";
-    const EMILY: &str = "RRVdSds5Zck6YnhYgchL8qCKqARhob64vk";
+    // const DIRK: &str = "RSTWA7QcQaEbhS4iJha2p1b5eYvUPpVXGP";
+    // const EMILY: &str = "RRVdSds5Zck6YnhYgchL8qCKqARhob64vk";
     const BOT_ADDRESS: &str = "iBnKXQnD1BFyvE8V4UVr4UKQz8h7FqfVu9";
 
-    #[test]
+    #[sqlx::test(fixtures("stakes"), migrator = "crate::MIGRATOR")]
     #[traced_test]
-    fn andromeda() {
-        let mut members = vec![];
-        members.push(PayoutMember {
-            identityaddress: Address::from_str(ALICE).unwrap(),
-            shares: Decimal::from_i64(405890416898688).unwrap(),
-            fee: Decimal::from_f32(0.05).unwrap(), // 0.5%
-        });
-        members.push(PayoutMember {
-            identityaddress: Address::from_str(ALICE).unwrap(),
-            shares: Decimal::from_i64(405890416898688).unwrap(),
-            fee: Decimal::from_f32(0.05).unwrap(), // 0.5%
-        });
-        members.push(PayoutMember {
-            identityaddress: Address::from_str(ALICE).unwrap(),
-            shares: Decimal::from_i64(405890416898688).unwrap(),
-            fee: Decimal::from_f32(0.05).unwrap(), // 0.5%
+    fn single_member(pool: PgPool) -> sqlx::Result<()> {
+        let stake = database::get_stake(&pool, "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV", 513251)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mut stake_members = vec![];
+        stake_members.push(StakeMember {
+            identity_address: Address::from_str(ALICE).unwrap(),
+            shares: Decimal::from_f64(123.456).unwrap(),
+            fee: Decimal::from_f32(0.01).unwrap(),
         });
 
         let payout = Payout::new(
-            Amount::from_sat(600000000),
-            // Amount::ZERO,
+            &stake,
             Decimal::ZERO,
-            members,
-            Address::from_str("iAetFs8T3hdePUpFVj2m5hhLfVMnVKJ8qt").unwrap(),
-            // client(),
+            stake_members,
+            Address::from_str(BOT_ADDRESS).unwrap(),
         )
         .unwrap();
 
-        debug!("{:#?}", payout.final_calc);
+        let mut to_test_against = vec![];
+
+        to_test_against.push(PayoutMember {
+            blockhash: BlockHash::from_str(
+                "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
+            )
+            .unwrap(),
+
+            identityaddress: Address::from_str(ALICE).unwrap(),
+            reward: Amount::from_sat(594_099_000),
+            shares: Decimal::from_f64(123.456).unwrap(),
+            fee: Amount::from_sat(6_001_000),
+        });
+
+        assert_eq!(payout.members, to_test_against);
+
+        Ok(())
     }
 
-    #[test]
+    #[sqlx::test(fixtures("stakes"), migrator = "crate::MIGRATOR")]
     #[traced_test]
-    fn single_member() {
-        let mut members = vec![];
-        members.push(PayoutMember {
-            identityaddress: Address::from_str(CHARLIE).unwrap(),
-            shares: Decimal::from_f32(456.0).unwrap(),
-            fee: Decimal::from_f32(0.005).unwrap(), // 0.5%
+    fn double_member(pool: PgPool) -> sqlx::Result<()> {
+        let stake = database::get_stake(&pool, "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV", 513251)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mut stake_members = vec![];
+        stake_members.push(StakeMember {
+            identity_address: Address::from_str(ALICE).unwrap(),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Decimal::from_f32(0.01).unwrap(),
+        });
+
+        stake_members.push(StakeMember {
+            identity_address: Address::from_str(BOB).unwrap(),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Decimal::from_f32(0.01).unwrap(),
         });
 
         let payout = Payout::new(
-            Amount::from_sat(600_000_000),
-            // Amount::from_sat(10000),
+            &stake,
             Decimal::ZERO,
-            members,
+            stake_members,
             Address::from_str(BOT_ADDRESS).unwrap(),
-            // client(),
         )
         .unwrap();
 
-        let mut final_calc = HashMap::new();
+        // let mut to_test_against = vec![];
 
-        final_calc.insert(
-            Address::from_str(CHARLIE).unwrap(),
-            Amount::from_sat(596_990_050),
-        );
+        let alice = PayoutMember {
+            blockhash: BlockHash::from_str(
+                "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
+            )
+            .unwrap(),
 
-        final_calc.insert(
-            Address::from_str(BOT_ADDRESS).unwrap(),
-            Amount::from_sat(2_999_950),
-        );
+            identityaddress: Address::from_str(ALICE).unwrap(),
+            reward: Amount::from_sat(297_049_500),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Amount::from_sat(3_000_500),
+        };
 
-        assert_eq!(payout.final_calc, final_calc);
+        assert!(payout.members.contains(&alice));
+
+        let bob = PayoutMember {
+            blockhash: BlockHash::from_str(
+                "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
+            )
+            .unwrap(),
+
+            identityaddress: Address::from_str(ALICE).unwrap(),
+            reward: Amount::from_sat(297_049_500),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Amount::from_sat(3_000_500),
+        };
+
+        assert!(payout.members.contains(&bob));
+
+        Ok(())
     }
 
+    #[sqlx::test(fixtures("stakes"), migrator = "crate::MIGRATOR")]
+    #[traced_test]
+    fn triple_member(pool: PgPool) -> sqlx::Result<()> {
+        let stake = database::get_stake(&pool, "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV", 513251)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mut stake_members = vec![];
+        stake_members.push(StakeMember {
+            identity_address: Address::from_str(ALICE).unwrap(),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Decimal::from_f32(0.01).unwrap(),
+        });
+
+        stake_members.push(StakeMember {
+            identity_address: Address::from_str(BOB).unwrap(),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Decimal::from_f32(0.01).unwrap(),
+        });
+
+        stake_members.push(StakeMember {
+            identity_address: Address::from_str(CHARLIE).unwrap(),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Decimal::from_f32(0.01).unwrap(),
+        });
+
+        let payout = Payout::new(
+            &stake,
+            Decimal::ZERO,
+            stake_members,
+            Address::from_str(BOT_ADDRESS).unwrap(),
+        )
+        .unwrap();
+
+        // let mut to_test_against = vec![];
+
+        let alice = PayoutMember {
+            blockhash: BlockHash::from_str(
+                "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
+            )
+            .unwrap(),
+
+            identityaddress: Address::from_str(ALICE).unwrap(),
+            reward: Amount::from_sat(198_033_000),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Amount::from_sat(2_000_333),
+        };
+
+        assert!(payout.members.contains(&alice));
+
+        let bob = PayoutMember {
+            blockhash: BlockHash::from_str(
+                "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
+            )
+            .unwrap(),
+
+            identityaddress: Address::from_str(ALICE).unwrap(),
+            reward: Amount::from_sat(198_033_000),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Amount::from_sat(2_000_333),
+        };
+
+        assert!(payout.members.contains(&bob));
+
+        let charlie = PayoutMember {
+            blockhash: BlockHash::from_str(
+                "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
+            )
+            .unwrap(),
+
+            identityaddress: Address::from_str(ALICE).unwrap(),
+            reward: Amount::from_sat(198_033_000),
+            shares: Decimal::from_f64(5.0).unwrap(),
+            fee: Amount::from_sat(2_000_333),
+        };
+
+        assert!(payout.members.contains(&charlie));
+        assert_eq!(payout.bot_fee_amount, Amount::from_sat(6_001_000));
+
+        Ok(())
+    }
+}
+/*
     #[traced_test]
     #[test]
     fn two_participants() {
