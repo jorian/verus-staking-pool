@@ -617,7 +617,7 @@ pub async fn insert_payout(pool: &PgPool, payout: &Payout) -> Result<(), Report>
         &payout.blockhash.to_string(),
         payout.amount.as_sat() as i64,
         &payout.total_work,
-        payout.bot_fee_amount.as_sat() as i64,
+        payout.pool_fee_amount.as_sat() as i64,
         payout.amount_paid_to_subs.as_sat() as i64,
         payout.members.len() as i64
     )

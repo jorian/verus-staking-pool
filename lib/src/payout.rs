@@ -20,10 +20,10 @@ pub struct Payout {
     pub blockhash: BlockHash,
     pub total_work: Decimal,
     pub amount: Amount,
-    pub bot_fee_amount: Amount,
+    // the difference between `amount` and the rewards for every payoutmember results in the pool fee:
+    pub pool_fee_amount: Amount,
     pub amount_paid_to_subs: Amount,
     pub members: Vec<PayoutMember>,
-    // pub final_calc: HashMap<Address, Amount>,
 }
 
 impl Payout {
@@ -31,13 +31,13 @@ impl Payout {
     #[allow(unused)]
     pub fn new(
         stake: &Stake,
-        bot_fee_discount: Decimal,
+        pool_fee_discount: Decimal,
         stake_members: Vec<StakeMember>,
-        bot_identity_address: Address,
+        pool_identity_address: Address,
     ) -> Result<Self, Report> {
         let mut amount = stake.amount;
-        // TODO get this from config
-        let mut bot_fee_amount = Amount::ZERO;
+
+        let mut pool_fee_amount = Amount::ZERO;
 
         // sum could get pretty large, so we need to work with a bigger number:
         let shares_sum: Decimal = stake_members
@@ -59,7 +59,7 @@ impl Payout {
 
             let member_fee = member
                 .fee
-                .checked_sub(bot_fee_discount)
+                .checked_sub(pool_fee_discount)
                 .unwrap_or(Decimal::ZERO);
 
             let fraction = shares_sum / member.shares;
@@ -91,7 +91,6 @@ impl Payout {
             });
         }
 
-        // let final_calc_sum = final_calc.values().fold(0, |acc, sum| acc + sum.as_sat());
         let final_calc_sum = payout_members
             .iter()
             .fold(Amount::ZERO, |acc, member| acc + member.reward);
@@ -105,7 +104,7 @@ impl Payout {
                     "pool_fee: there is a difference of {pool_fee} between the staked amount and the amount to pay out"
                 );
 
-                bot_fee_amount += pool_fee;
+                pool_fee_amount += pool_fee;
             }
         }
 
@@ -114,7 +113,7 @@ impl Payout {
             blockhash: stake.blockhash.clone(),
             total_work: shares_sum,
             amount: stake.amount,
-            bot_fee_amount,
+            pool_fee_amount,
             amount_paid_to_subs: final_calc_sum,
             members: payout_members,
         })
@@ -138,10 +137,6 @@ impl ToString for Payout {
 #[derive(Debug, Clone)]
 pub enum PayoutError {
     PayoutTooLow,
-    // FeeTooHigh,
-    // FeeAbnormal,
-    // FeeNegative,
-    // ZeroWork,
 }
 
 impl std::error::Error for PayoutError {
@@ -160,9 +155,6 @@ impl Display for PayoutError {
             Self::PayoutTooLow => {
                 f.write_str("The amount to pay out was lower than the transaction fee")
             }
-            // Self::FeeAbnormal => f.write_str("Fee is not correct"),
-            // Self::FeeNegative => f.write_str("Fee is negative"),
-            // Self::ZeroWork => f.write_str("Participant has no shares, should not be in hashmap"),
         }
     }
 }
@@ -172,14 +164,10 @@ mod tests {
     use sqlx::PgPool;
     use std::str::FromStr;
     use tracing_test::traced_test;
-    use vrsc_rpc::{bitcoin::Txid, Auth, Client};
 
-    use crate::{database, StakeResult};
+    use crate::database;
 
     use super::*;
-    // fn client() -> Client {
-    //     Client::vrsc(false, Auth::ConfigFile).expect("a client")
-    // }
 
     const _VRSC: &str = "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV";
     const _VRSCTEST: &str = "iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq";
@@ -188,7 +176,7 @@ mod tests {
     const CHARLIE: &str = "RDebEHgiTFDRDUN5Uisx7ntUuRdRJHt6SK";
     // const DIRK: &str = "RSTWA7QcQaEbhS4iJha2p1b5eYvUPpVXGP";
     // const EMILY: &str = "RRVdSds5Zck6YnhYgchL8qCKqARhob64vk";
-    const BOT_ADDRESS: &str = "iBnKXQnD1BFyvE8V4UVr4UKQz8h7FqfVu9";
+    const POOL_ADDRESS: &str = "iBnKXQnD1BFyvE8V4UVr4UKQz8h7FqfVu9";
 
     #[sqlx::test(fixtures("stakes"), migrator = "crate::MIGRATOR")]
     #[traced_test]
@@ -209,7 +197,7 @@ mod tests {
             &stake,
             Decimal::ZERO,
             stake_members,
-            Address::from_str(BOT_ADDRESS).unwrap(),
+            Address::from_str(POOL_ADDRESS).unwrap(),
         )
         .unwrap();
 
@@ -257,11 +245,9 @@ mod tests {
             &stake,
             Decimal::ZERO,
             stake_members,
-            Address::from_str(BOT_ADDRESS).unwrap(),
+            Address::from_str(POOL_ADDRESS).unwrap(),
         )
         .unwrap();
-
-        // let mut to_test_against = vec![];
 
         let alice = PayoutMember {
             blockhash: BlockHash::from_str(
@@ -325,11 +311,9 @@ mod tests {
             &stake,
             Decimal::ZERO,
             stake_members,
-            Address::from_str(BOT_ADDRESS).unwrap(),
+            Address::from_str(POOL_ADDRESS).unwrap(),
         )
         .unwrap();
-
-        // let mut to_test_against = vec![];
 
         let alice = PayoutMember {
             blockhash: BlockHash::from_str(
@@ -372,7 +356,7 @@ mod tests {
         };
 
         assert!(payout.members.contains(&charlie));
-        assert_eq!(payout.bot_fee_amount, Amount::from_sat(6_001_000));
+        assert_eq!(payout.pool_fee_amount, Amount::from_sat(6_001_000));
 
         Ok(())
     }
