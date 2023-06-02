@@ -211,7 +211,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             let bot_identity_address = cs.bot_identity_address.clone();
             let nats_client = cs.nats_client.clone();
             async move {
-                util::process_payments(
+                if let Err(e) = util::process_payments(
                     pool,
                     client,
                     nats_client,
@@ -220,7 +220,9 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     TimeDuration::from_secs(60 * 60),
                 )
                 .await
-                .unwrap();
+                {
+                    error!("an error occurred in PayoutManager, stopping payments\n{e:?}");
+                }
             }
         });
 

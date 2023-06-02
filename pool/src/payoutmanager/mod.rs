@@ -12,15 +12,34 @@ use vrsc_rpc::{
 };
 
 #[derive(Debug)]
+pub enum PayoutManagerError {
+    DbWriteFail,
+}
+
+impl std::error::Error for PayoutManagerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        self.source()
+    }
+}
+
+impl std::fmt::Display for PayoutManagerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DbWriteFail => write!(f, "The transaction failed"),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct PayoutManager {
     _pool: PgPool,
 }
 
 impl PayoutManager {
-    // pub fn new(pool: PgPool) -> Self {
-    //     Self { _pool: pool }
-    // }
-
     pub async fn create_payout(
         pool: &PgPool,
         stake: &Stake,
@@ -115,13 +134,10 @@ impl PayoutManager {
         Ok(None)
     }
 
-    pub async fn send_payment(
+    pub fn prepare_payment<'a>(
         payout_members: &HashMap<Address, Vec<PayoutMember>>,
-        bot_address: &Address,
         client: &Client,
-    ) -> Result<Option<Txid>, Report> {
-        // the sum of rewards is higher than the threshold
-
+    ) -> Result<Vec<SendCurrencyOutput<'a>>, Report> {
         let payment_vouts = payout_members
             .iter()
             .map(|(address, epm)| {
@@ -139,7 +155,15 @@ impl PayoutManager {
             .map(|(address, amount)| SendCurrencyOutput::new(None, amount, &address.to_string()))
             .collect::<Vec<_>>();
 
-        let opid = client.send_currency(&bot_address.to_string(), outputs, None, None)?;
+        Ok(outputs)
+    }
+
+    pub async fn send_payment<'a>(
+        outputs: Vec<SendCurrencyOutput<'a>>,
+        pool_address: &Address,
+        client: &Client,
+    ) -> Result<Option<Txid>, Report> {
+        let opid = client.send_currency(&pool_address.to_string(), outputs, None, None)?;
 
         if let Some(txid) = wait_for_sendcurrency_finish(&client, &opid).await? {
             trace!("{txid}");
@@ -149,16 +173,6 @@ impl PayoutManager {
 
         Ok(None)
     }
-
-    // pub fn send_payment(client: Client, payment_members: HashMap<Address, Amount>) {
-    //     // create a send_currency transaction for the members in the hashmap
-    //     // if the transaction has been mined, decrease the balance for every subscriber with the amount in the hashmap.
-    // }
-
-    // // gets all the accumulated bot fees
-    // pub fn get_bot_fees(currencyid: &str) {
-    //     // query the payout table and gets the summed total of all the bot_fees for the specified currencyid
-    // }
 }
 
 async fn wait_for_sendcurrency_finish(client: &Client, opid: &str) -> Result<Option<Txid>, Report> {

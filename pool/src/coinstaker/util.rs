@@ -15,7 +15,7 @@ use vrsc_rpc::{
     Client, RpcApi,
 };
 
-use crate::payoutmanager::PayoutManager;
+use crate::payoutmanager::{PayoutManager, PayoutManagerError};
 
 use super::{CoinStaker, CoinStakerMessage};
 
@@ -427,8 +427,11 @@ pub async fn process_payments(
         if let Some(eligible) =
             PayoutManager::get_eligible_for_payout(&pool, &currencyid.to_string()).await?
         {
+            let outputs = PayoutManager::prepare_payment(&eligible, &client)?;
+            debug!("outputs: {outputs:#?}");
+
             if let Some(txid) =
-                PayoutManager::send_payment(&eligible, &bot_identity_address, &client).await?
+                PayoutManager::send_payment(outputs, &bot_identity_address, &client).await?
             {
                 if let Err(e) = database::update_payment_members(
                     &pool,
@@ -440,11 +443,17 @@ pub async fn process_payments(
                 {
                     error!(
                         "A payment was made but it could not be processed in the database\n
-                error: {:?}\n
-                txid: {},\n
-                eligible payment members: {:#?}",
-                        e, txid, &eligible
+                        chain: {}\n
+                        txid: {},\n
+                        error: {:?}\n
+                        eligible payment members: {:#?}",
+                        &currencyid.to_string(),
+                        txid,
+                        e,
+                        &eligible
                     );
+
+                    return Err(PayoutManagerError::DbWriteFail.into());
                 }
 
                 let chain_name = client
