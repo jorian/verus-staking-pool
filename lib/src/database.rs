@@ -735,6 +735,35 @@ pub async fn update_payment_members(
 
     Ok(())
 }
+
+pub async fn get_payouts(
+    pool: &PgPool,
+    currencyid: &str,
+    identityaddresses: &[String],
+) -> Result<Vec<PayoutMember>, Report> {
+    sqlx::query!(
+        "SELECT * 
+        FROM payout_members 
+        WHERE currencyid = $1 
+        AND identityaddress IN (SELECT * FROM UNNEST($2::text[]))", // this is the primary key
+        currencyid,
+        identityaddresses,
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok(PayoutMember {
+            blockhash: BlockHash::from_str(&row.blockhash).unwrap(),
+            identityaddress: Address::from_str(&row.identityaddress).unwrap(),
+            reward: Amount::from_sat(row.reward.try_into()?),
+            shares: row.shares,
+            fee: Amount::from_sat(row.fee.try_into()?),
+        })
+    })
+    .collect::<Result<Vec<_>, _>>()
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::SubAssign;

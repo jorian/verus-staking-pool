@@ -1,6 +1,6 @@
 use color_eyre::Report;
 use futures::StreamExt;
-use poollib::{Payload, Stake, Subscriber};
+use poollib::{Payload, PayoutMember, Stake, Subscriber};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, trace};
@@ -30,7 +30,7 @@ pub async fn nats_server(
                 debug!("new NATS message on {}: {:?}", &currencyid, &request);
 
                 if let Some(reply) = request.reply {
-                    let payload: Payload =
+                    let mut payload: Payload =
                         serde_json::from_slice::<Payload>(request.payload.as_ref())?;
 
                     match &*payload.command {
@@ -236,6 +236,19 @@ pub async fn nats_server(
                             let resp = os_rx.await?;
                             let resp_json = serde_json::to_string(&resp)?;
                             client.publish(reply, resp_json.into()).await?;
+                        }
+                        "payouts" => {
+                            debug!("{payload:?}");
+                            let (os_tx, os_rx) = oneshot::channel::<Vec<PayoutMember>>();
+                            let s_ids = serde_json::from_value(payload.data["identities"].take())?;
+                            debug!("{s_ids:?}");
+
+                            cs_tx
+                                .send(CoinStakerMessage::GetPayouts(os_tx, s_ids))
+                                .await?;
+
+                            let resp = os_rx.await?;
+                            client.publish(reply, serde_json::to_string(&resp)?.into()).await?;
                         }
                         _ => {}
                     }

@@ -18,13 +18,15 @@ pub mod payout;
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../migrations");
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PayoutMember {
     pub blockhash: BlockHash,
     pub identityaddress: Address,
+    #[serde(with = "as_sat")]
     pub reward: Amount,
     pub shares: Decimal,
     // fee is in basis points: 5% should be entered as 0.05
+    #[serde(with = "as_sat")]
     pub fee: Amount,
 }
 

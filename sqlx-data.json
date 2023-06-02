@@ -502,6 +502,75 @@
     },
     "query": "UPDATE stakes SET status = 'processed', result = $1 WHERE currencyid = $2 AND blockhash = $3"
   },
+  "ca92a36802d1e2135a89c2b4066198913b6afc49fe5bea34d1db10f15969f25b": {
+    "describe": {
+      "columns": [
+        {
+          "name": "currencyid",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "blockhash",
+          "ordinal": 1,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "identityaddress",
+          "ordinal": 2,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "shares",
+          "ordinal": 3,
+          "type_info": "Numeric"
+        },
+        {
+          "name": "reward",
+          "ordinal": 4,
+          "type_info": "Int8"
+        },
+        {
+          "name": "fee",
+          "ordinal": 5,
+          "type_info": "Int8"
+        },
+        {
+          "name": "created_at",
+          "ordinal": 6,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "updated_at",
+          "ordinal": 7,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "payment_txid",
+          "ordinal": 8,
+          "type_info": "Varchar"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true
+      ],
+      "parameters": {
+        "Left": [
+          "Text",
+          "TextArray"
+        ]
+      }
+    },
+    "query": "SELECT * \n        FROM payout_members \n        WHERE currencyid = $1 \n        AND identityaddress IN (SELECT * FROM UNNEST($2::text[]))"
+  },
   "ccda9de794ad20d1ddb98039348a82a8be668e37eb6ddd62cb3e41c8b0456f89": {
     "describe": {
       "columns": [],

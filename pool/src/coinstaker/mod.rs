@@ -8,7 +8,8 @@ use chrono::{DateTime, Duration, Utc};
 use color_eyre::Report;
 use futures::StreamExt;
 use poollib::{
-    chain::Chain, configuration::CoinConfig, database, Payload, PgPool, Stake, Subscriber,
+    chain::Chain, configuration::CoinConfig, database, Payload, PayoutMember, PgPool, Stake,
+    Subscriber,
 };
 use rust_decimal::{
     prelude::{FromPrimitive, ToPrimitive},
@@ -674,6 +675,17 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         }
                     }
                 }
+                CoinStakerMessage::GetPayouts(os_tx, identityaddresses) => {
+                    // get all payouts from the database for the combination of currencyid and every identityaddress in the vec
+                    let payouts = database::get_payouts(
+                        &cs.pool,
+                        &cs.chain.currencyid.to_string(),
+                        &identityaddresses,
+                    )
+                    .await?;
+
+                    os_tx.send(payouts).unwrap();
+                }
             }
         }
     } else {
@@ -700,6 +712,7 @@ pub enum CoinStakerMessage {
     GetSubscriptions(oneshot::Sender<Vec<Subscriber>>, Vec<String>),
     SetStaking(oneshot::Sender<()>, bool),
     NewSubscriber(oneshot::Sender<Result<Subscriber, CoinStakerError>>, String),
+    GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<String>),
 }
 
 async fn tmq_block_listen(
