@@ -82,84 +82,108 @@ pub async fn check_for_stake(
     cs: &mut CoinStaker,
 ) -> Result<(), Report> {
     if matches!(block.validation_type, ValidationType::Stake) {
-        if let Some(postxddest) = block.postxddest.as_ref() {
-            if let Some(subscriber) = active_subscribers.iter().find(|sub| {
-                &sub.identity_address == postxddest && &sub.currencyid == &cs.chain.currencyid
-            }) {
-                trace!(
-                    "block {} was mined by a subscriber: {postxddest}",
-                    block.hash
-                );
-
-                debug!("{:#?}", block);
-
-                let blockheight = block.height;
-
-                let mut txns = block.tx.iter();
-
-                if let Some(coinbase_tx) = txns.next() {
-                    let block_reward = coinbase_tx.vout.first().unwrap().value_sat;
-                    let pos_source_vout_num = block.possourcevoutnum.unwrap();
-                    // unwrap: this is risky, but in theory every stake has a pos source transaction
-                    let staker_spend = txns.next().unwrap();
-                    trace!("staker_spend {:#?}", staker_spend);
-                    let pos_source_amount =
-                        dbg!(staker_spend.vin.first()).unwrap().value_sat.unwrap();
-
-                    let stake = Stake::new(
-                        cs.chain.currencyid.clone(),
-                        block.hash.clone(),
-                        postxddest.clone(),
-                        block.possourcetxid.unwrap().clone(),
-                        pos_source_vout_num,
-                        pos_source_amount,
-                        StakeResult::Pending,
-                        block_reward,
-                        blockheight,
+        if block.confirmations >= 0 {
+            if let Some(postxddest) = block.postxddest.as_ref() {
+                debug!("{:#?}", postxddest);
+                if let Some(subscriber) = active_subscribers.iter().find(|sub| {
+                    &sub.identity_address == postxddest && &sub.currencyid == &cs.chain.currencyid
+                }) {
+                    trace!(
+                        "block {} was mined by a subscriber: {postxddest}",
+                        block.hash
                     );
 
-                    database::move_work_to_round(
-                        &cs.pool,
-                        &cs.chain.currencyid.to_string(),
-                        0,
-                        blockheight.try_into()?,
-                    )
-                    .await?;
 
-                    database::insert_stake(&cs.pool, &stake).await?;
+                    let blockheight = block.height;
 
-                    let payload = Payload {
-                        command: "stake".to_string(),
-                        data: json!({
-                            "chain_name": cs.chain.name,
-                            "blockheight": blockheight,
-                            "blockhash": stake.blockhash,
-                            "staked_by": subscriber.identity_name,
-                            "amount": block_reward.as_sat()
-                        }),
-                    };
+                    let mut txns = block.tx.iter();
 
-                    cs.nats_client
-                        .publish(
-                            "ipc.coinstaker".into(),
-                            serde_json::to_vec(&json!(payload))?.into(),
+                    if let Some(coinbase_tx) = txns.next() {
+                        let block_reward = coinbase_tx.vout.first().unwrap().value_sat;
+                        let pos_source_vout_num = block.possourcevoutnum.unwrap();
+                        // unwrap: this is risky, but in theory every stake has a pos source transaction
+                        let staker_spend = txns.last().unwrap();
+                        trace!("staker_spend {:#?}", staker_spend);
+                        let pos_source_amount =
+                            
+
+                        // TODO not stable: need to specifically query the blockchain for the tx
+                    
+                        if let Ok(client) = cs.chain.verusd_client() {
+                            // unwrap: we know it's a stake
+                            if let Ok(tx) =
+                                client.get_raw_transaction_verbose(&block.possourcetxid.unwrap())
+                            {
+                                if let Some(vout) = tx.vout.get(pos_source_vout_num as usize) {
+                                    trace!("found the pos source vout: {vout:?}");
+                                    vout.value_sat
+                                } else {
+                                    staker_spend.vin.first().unwrap().value_sat.unwrap()
+                                }
+                            } else {
+                                staker_spend.vin.first().unwrap().value_sat.unwrap()
+                            }
+                        } else {
+                            staker_spend.vin.first().unwrap().value_sat.unwrap()
+                        };
+
+                        let stake = Stake::new(
+                            cs.chain.currencyid.clone(),
+                            block.hash.clone(),
+                            postxddest.clone(),
+                            block.possourcetxid.unwrap().clone(),
+                            pos_source_vout_num,
+                            pos_source_amount,
+                            StakeResult::Pending,
+                            block_reward,
+                            blockheight,
+                        );
+
+                        database::move_work_to_round(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                            0,
+                            blockheight.try_into()?,
                         )
                         .await?;
 
-                    tokio::spawn({
-                        let chain_c = cs.chain.clone();
-                        let c_tx = cs.get_mpsc_sender();
-                        let tx = coinbase_tx.txid.clone();
-                        async move {
-                            if let Err(e) = wait_for_maturity(chain_c, stake, c_tx).await {
-                                error!("error in wait_for_maturity: {tx}: {:?}", e);
+                        database::insert_stake(&cs.pool, &stake).await?;
+
+                        let payload = Payload {
+                            command: "stake".to_string(),
+                            data: json!({
+                                "chain_name": cs.chain.name,
+                                "blockheight": blockheight,
+                                "blockhash": stake.blockhash,
+                                "staked_by": subscriber.identity_name,
+                                "amount": block_reward.as_sat()
+                            }),
+                        };
+
+                        cs.nats_client
+                            .publish(
+                                "ipc.coinstaker".into(),
+                                serde_json::to_vec(&json!(payload))?.into(),
+                            )
+                            .await?;
+
+                        tokio::spawn({
+                            let chain_c = cs.chain.clone();
+                            let c_tx = cs.get_mpsc_sender();
+                            let tx = coinbase_tx.txid.clone();
+                            async move {
+                                if let Err(e) = wait_for_maturity(chain_c, stake, c_tx).await {
+                                    error!("error in wait_for_maturity: {tx}: {:?}", e);
+                                }
                             }
-                        }
-                    });
-                } else {
-                    error!("there was no coinbase tx");
+                        });
+                    } else {
+                        error!("there was no coinbase tx");
+                    }
                 }
             }
+        } else {
+            trace!("this was a stale before we could determine it was a stake");
         }
     }
 
@@ -323,6 +347,7 @@ pub async fn add_work(
                 acc
             });
 
+        debug!("{:#?}", pending_stakes);
         debug!("{:#?}", payload);
 
         pending_stakes.iter().for_each(|stake| {

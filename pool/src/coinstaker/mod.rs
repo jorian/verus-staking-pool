@@ -280,6 +280,8 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         )
                         .await?;
                         // add the work up until here
+                        // TODO because the pending stakes are not updated yet, there is always one missing work piece for the staker for the
+                        // duration of 1 round.
                         util::add_work(
                             &active_subscribers,
                             &pending_stakes,
