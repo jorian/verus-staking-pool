@@ -273,8 +273,21 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                             continue;
                         }
+
+                        let pending_stakes = database::get_pending_stakes(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                        )
+                        .await?;
                         // add the work up until here
-                        util::add_work(&active_subscribers, &client, &mut cs, block.height).await?;
+                        util::add_work(
+                            &active_subscribers,
+                            &pending_stakes,
+                            &client,
+                            &mut cs,
+                            block.height,
+                        )
+                        .await?;
 
                         if let Err(e) =
                             util::check_for_stake(&block, &active_subscribers, &mut cs).await

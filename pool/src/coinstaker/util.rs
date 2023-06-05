@@ -19,7 +19,7 @@ use crate::payoutmanager::{PayoutManager, PayoutManagerError};
 
 use super::{CoinStaker, CoinStakerMessage};
 
-#[instrument(level = "trace", skip(chain, c_tx), fields(chain = chain.name))]
+#[instrument(level = "trace", skip(chain, c_tx, stake), fields(chain = chain.name))]
 pub async fn wait_for_maturity(
     chain: Chain, // only needed for daemon client
     stake: Stake,
@@ -50,12 +50,12 @@ pub async fn wait_for_maturity(
             break;
         } else {
             // blockstomaturity is None if a coinbase tx has matured.
-            if confirmations < 100 {
+            if confirmations < 150 {
                 trace!(
                     "{}:{} not matured, wait 10 minutes (blocks to maturity: {})",
                     stake.blockhash,
                     stake.blockheight,
-                    100 - confirmations
+                    150 - confirmations
                 );
                 tokio::time::sleep(TimeDuration::from_secs(600)).await;
             } else {
@@ -283,6 +283,7 @@ pub async fn check_subscriptions(
 }
 pub async fn add_work(
     active_subscribers: &[Subscriber],
+    pending_stakes: &[Stake],
     client: &Client,
     cs: &mut CoinStaker,
     latest_blockheight: u64,
@@ -299,7 +300,7 @@ pub async fn add_work(
                     .as_ref(),
             ),
         )?;
-        let payload = payload
+        let mut payload = payload
             .into_iter()
             .filter(|lu| lu.amount.is_positive())
             .map(|lu| {
@@ -311,6 +312,9 @@ pub async fn add_work(
                     Decimal::from_u64(lu.amount.to_unsigned().unwrap().as_sat()).unwrap(),
                 )
             })
+            // get all the pending stakes
+            // check if one of the addresses within this function is there with a pending stake
+            // add that amount of work to the address as not to punish stakers
             .fold(HashMap::new(), |mut acc, (address, amount)| {
                 let _ = *acc
                     .entry(address)
@@ -318,6 +322,19 @@ pub async fn add_work(
                     .or_insert(amount);
                 acc
             });
+
+        debug!("{:#?}", payload);
+
+        pending_stakes.iter().for_each(|stake| {
+            if payload.contains_key(&stake.mined_by) {
+                debug!("adding work to staker to undo stake punishment");
+                payload.entry(stake.mined_by.clone()).and_modify(|v| {
+                    *v += Decimal::from_i64(stake.pos_source_amount.as_sat() as i64).unwrap()
+                });
+            }
+        });
+
+        debug!("{:#?}", payload);
 
         if !payload.is_empty() {
             debug!("payload to insert: {:#?}", &payload);

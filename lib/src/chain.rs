@@ -1,14 +1,13 @@
 use std::{fmt::Display, str::FromStr};
 
 use color_eyre::Report;
-use poise::ChoiceParameter;
 use vrsc_rpc::{json::vrsc::Address, Auth, Client};
 
 use crate::configuration::get_coin_configuration;
 
 // use this as the main entry point for adding new chains the staking pool.
 
-#[derive(ChoiceParameter, Debug)]
+#[derive(Debug)]
 pub enum ChainChoice {
     // ANDROMEDA,
     QUANTUM,
