@@ -32,7 +32,7 @@ pub async fn check_for_maturity(
 
     for stake in pending_stakes.into_iter() {
         trace!(
-            "starting wait for maturity loop for {}:{}",
+            "check maturity for {}:{}",
             stake.blockhash,
             stake.blockheight
         );
@@ -44,7 +44,7 @@ pub async fn check_for_maturity(
 
         if confirmations < 0 {
             trace!(
-                "we have staked a stale block :( {}:{}",
+                "we have a stale block :( {}:{}",
                 stake.blockhash,
                 stake.blockheight
             );
@@ -60,11 +60,7 @@ pub async fn check_for_maturity(
                     150 - confirmations
                 );
             } else {
-                trace!(
-                    "{}:{} has matured, send a message to PayoutMgr",
-                    stake.blockhash,
-                    stake.blockheight
-                );
+                trace!("{}:{} has matured", stake.blockhash, stake.blockheight);
 
                 // block with round <blockheight> is now mature, let's do the payout.
                 c_tx.send(CoinStakerMessage::MaturedBlock(stake.clone()))

@@ -391,6 +391,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                 data: json!({
                                     "chain": chain_name,
                                     "blockhash": payout.blockhash.to_string(),
+                                    "blockheight": stake.blockheight,
                                     "staked_by": mined_by_name,
                                     "rewards": payout.amount_paid_to_subs.as_sat(),
                                     "n_subs": payout.members.len()
@@ -424,11 +425,30 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         let lu = client
                             .list_unspent(
                                 Some(150),
-                                Some(999999),
+                                Some(9999999),
                                 Some(
                                     &subscriptions
                                         .into_iter()
-                                        .filter(|s| &s.status == "subscribed")
+                                        .filter(|s| {
+                                            (&s.status == "subscribed")
+                                                && if let Ok(identity) = client
+                                                    .get_identity_history(
+                                                        &s.identity_address.to_string(),
+                                                        0,
+                                                        9999999,
+                                                    )
+                                                {
+                                                    let block = client
+                                                        .get_block_by_height(mining_info.blocks, 1)
+                                                        .unwrap();
+
+                                                    identity.blockheight
+                                                        < block.height.checked_sub(150).unwrap_or(0)
+                                                            as i64
+                                                } else {
+                                                    false
+                                                }
+                                        })
                                         .map(|sub| sub.identity_address)
                                         .collect::<Vec<Address>>(),
                                 ),
@@ -481,6 +501,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         {
                             match &*subscriber.status {
                                 "subscribed" => {
+                                    trace!("is a subscriber already");
                                     if cs.identity_is_eligible(&identity.identity, &subscriber) {
                                         os_tx
                                             .send(json!({
@@ -554,6 +575,13 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                                     format!(
                                                         "{s_id} changed from pending to subscribed"
                                                     )
+                                            }))
+                                            .unwrap();
+                                    } else {
+                                        os_tx
+                                            .send(json!({
+                                                "result":
+                                                    format!("{s_id} ineligible, subscriber still pending")
                                             }))
                                             .unwrap();
                                     }
