@@ -276,7 +276,23 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         // TODO because the pending stakes are not updated yet, there is always one missing work piece for the staker for the
                         // duration of 1 round.
                         util::add_work(
-                            &active_subscribers,
+                            &active_subscribers
+                                .iter()
+                                .filter(|subscriber| {
+                                    if let Ok(identity) = client.get_identity_history(
+                                        &subscriber.identity_address.to_string(),
+                                        0,
+                                        99999999,
+                                    ) {
+                                        // identities need a 150 block cooldown if they were updated, before they can stake
+                                        identity.blockheight
+                                            < block.height.checked_sub(150).unwrap_or(0) as i64
+                                    } else {
+                                        false
+                                    }
+                                })
+                                .cloned()
+                                .collect::<Vec<Subscriber>>(),
                             &pending_stakes,
                             &client,
                             &mut cs,

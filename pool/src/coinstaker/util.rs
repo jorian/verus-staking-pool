@@ -311,17 +311,11 @@ pub async fn add_work(
             .into_iter()
             .filter(|lu| lu.amount.is_positive())
             .map(|lu| {
-                // an address from the daemon is always correct.
-                // amount is always positive as we've filtered out negatives before
-
                 (
                     lu.address.unwrap(),
                     Decimal::from_u64(lu.amount.to_unsigned().unwrap().as_sat()).unwrap(),
                 )
             })
-            // get all the pending stakes
-            // check if one of the addresses within this function is there with a pending stake
-            // add that amount of work to the address as not to punish stakers
             .fold(HashMap::new(), |mut acc, (address, amount)| {
                 let _ = *acc
                     .entry(address)
@@ -330,6 +324,9 @@ pub async fn add_work(
                 acc
             });
 
+        // get all the pending stakes
+        // check if one of the addresses within this function is there with a pending stake
+        // add that amount of work to the address as not to punish stakers
         debug!("{:#?}", pending_stakes);
         debug!("{:#?}", payload);
 
