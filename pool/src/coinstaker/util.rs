@@ -22,7 +22,7 @@ use super::{CoinStaker, CoinStakerMessage};
 #[instrument(level = "trace", skip(chain, c_tx, pending_stakes), fields(chain = chain.name))]
 pub async fn check_for_maturity(
     chain: Chain, // only needed for daemon client
-    pending_stakes: Vec<Stake>,
+    pending_stakes: &[Stake],
     c_tx: mpsc::Sender<CoinStakerMessage>,
 ) -> Result<(), Report> {
     trace!(
@@ -49,16 +49,16 @@ pub async fn check_for_maturity(
                 stake.blockheight
             );
 
-            c_tx.send(CoinStakerMessage::StaleBlock(stake)).await?;
+            c_tx.send(CoinStakerMessage::StaleBlock(stake.clone()))
+                .await?;
         } else {
             if confirmations < 150 {
                 trace!(
-                    "{}:{} not matured, wait 10 minutes (blocks to maturity: {})",
+                    "{}:{} not matured (blocks to maturity: {})",
                     stake.blockhash,
                     stake.blockheight,
                     150 - confirmations
                 );
-                tokio::time::sleep(TimeDuration::from_secs(600)).await;
             } else {
                 trace!(
                     "{}:{} has matured, send a message to PayoutMgr",
@@ -67,9 +67,8 @@ pub async fn check_for_maturity(
                 );
 
                 // block with round <blockheight> is now mature, let's do the payout.
-                c_tx.send(CoinStakerMessage::MaturedBlock(stake)).await?;
-
-                break;
+                c_tx.send(CoinStakerMessage::MaturedBlock(stake.clone()))
+                    .await?;
             }
         }
     }

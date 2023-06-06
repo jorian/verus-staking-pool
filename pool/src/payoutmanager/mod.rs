@@ -60,10 +60,6 @@ impl PayoutManager {
 
         debug!("{:#?}", payout);
 
-        // store payout statement in database
-        // store payment members in database
-        // update balances for subscribers
-
         payout
     }
 
