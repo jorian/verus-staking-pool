@@ -185,23 +185,15 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             }
         }
 
-        // process any stakes that were still maturing and might have matured now:
         let maturing_stakes =
             database::get_pending_stakes(&cs.pool, &cs.chain.currencyid.to_string()).await?;
         debug!("pending txns {:#?}", maturing_stakes);
 
-        for stake in maturing_stakes {
-            let chain_c = cs.chain.clone();
-            let c_tx = cs.get_mpsc_sender();
+        let chain_c = cs.chain.clone();
+        let c_tx = cs.get_mpsc_sender();
 
-            tokio::spawn(async move {
-                if let Err(e) = util::wait_for_maturity(chain_c, stake.clone(), c_tx).await {
-                    error!(
-                        "wait for maturity: {} ({}): {:?}",
-                        &stake.blockhash, &stake.currencyid, e
-                    )
-                }
-            });
+        if let Err(e) = util::check_for_maturity(chain_c, maturing_stakes, c_tx).await {
+            error!("wait for maturity: {:?}", e);
         }
 
         // starts a tokio thread that processes payments every period as defined.
@@ -279,6 +271,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                             &cs.chain.currencyid.to_string(),
                         )
                         .await?;
+
                         // add the work up until here
                         // TODO because the pending stakes are not updated yet, there is always one missing work piece for the staker for the
                         // duration of 1 round.
@@ -288,6 +281,13 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                             &client,
                             &mut cs,
                             block.height,
+                        )
+                        .await?;
+
+                        util::check_for_maturity(
+                            cs.chain.clone(),
+                            pending_stakes,
+                            cs.get_mpsc_sender(),
                         )
                         .await?;
 

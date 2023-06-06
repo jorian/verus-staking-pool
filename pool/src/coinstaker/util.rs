@@ -19,21 +19,25 @@ use crate::payoutmanager::{PayoutManager, PayoutManagerError};
 
 use super::{CoinStaker, CoinStakerMessage};
 
-#[instrument(level = "trace", skip(chain, c_tx, stake), fields(chain = chain.name))]
-pub async fn wait_for_maturity(
+#[instrument(level = "trace", skip(chain, c_tx, pending_stakes), fields(chain = chain.name))]
+pub async fn check_for_maturity(
     chain: Chain, // only needed for daemon client
-    stake: Stake,
+    pending_stakes: Vec<Stake>,
     c_tx: mpsc::Sender<CoinStakerMessage>,
 ) -> Result<(), Report> {
     trace!(
-        "starting wait for maturity loop for {}:{}",
-        stake.blockhash,
-        stake.blockheight
+        "checking {} pending stakes for maturity",
+        pending_stakes.len()
     );
-    loop {
-        // client fails if stored in memory, so get a new one every loop
+
+    for stake in pending_stakes.into_iter() {
+        trace!(
+            "starting wait for maturity loop for {}:{}",
+            stake.blockhash,
+            stake.blockheight
+        );
+
         let client = chain.verusd_client()?;
-        // let tx = client.get_transaction(&txid, None)?;
         let block = client.get_block(&stake.blockhash, 2)?;
 
         let confirmations = block.confirmations;
@@ -46,10 +50,7 @@ pub async fn wait_for_maturity(
             );
 
             c_tx.send(CoinStakerMessage::StaleBlock(stake)).await?;
-
-            break;
         } else {
-            // blockstomaturity is None if a coinbase tx has matured.
             if confirmations < 150 {
                 trace!(
                     "{}:{} not matured, wait 10 minutes (blocks to maturity: {})",
@@ -93,7 +94,6 @@ pub async fn check_for_stake(
                         block.hash
                     );
 
-
                     let blockheight = block.height;
 
                     let mut txns = block.tx.iter();
@@ -104,12 +104,7 @@ pub async fn check_for_stake(
                         // unwrap: this is risky, but in theory every stake has a pos source transaction
                         let staker_spend = txns.last().unwrap();
                         trace!("staker_spend {:#?}", staker_spend);
-                        let pos_source_amount =
-                            
-
-                        // TODO not stable: need to specifically query the blockchain for the tx
-                    
-                        if let Ok(client) = cs.chain.verusd_client() {
+                        let pos_source_amount = if let Ok(client) = cs.chain.verusd_client() {
                             // unwrap: we know it's a stake
                             if let Ok(tx) =
                                 client.get_raw_transaction_verbose(&block.possourcetxid.unwrap())
@@ -166,17 +161,6 @@ pub async fn check_for_stake(
                                 serde_json::to_vec(&json!(payload))?.into(),
                             )
                             .await?;
-
-                        tokio::spawn({
-                            let chain_c = cs.chain.clone();
-                            let c_tx = cs.get_mpsc_sender();
-                            let tx = coinbase_tx.txid.clone();
-                            async move {
-                                if let Err(e) = wait_for_maturity(chain_c, stake, c_tx).await {
-                                    error!("error in wait_for_maturity: {tx}: {:?}", e);
-                                }
-                            }
-                        });
                     } else {
                         error!("there was no coinbase tx");
                     }
@@ -190,7 +174,6 @@ pub async fn check_for_stake(
     Ok(())
 }
 
-//
 pub async fn check_subscriptions(
     cs: &mut CoinStaker,
     vout: &TransactionVout,
@@ -350,14 +333,22 @@ pub async fn add_work(
         debug!("{:#?}", pending_stakes);
         debug!("{:#?}", payload);
 
-        pending_stakes.iter().for_each(|stake| {
-            if payload.contains_key(&stake.mined_by) {
-                debug!("adding work to staker to undo stake punishment");
-                payload.entry(stake.mined_by.clone()).and_modify(|v| {
-                    *v += Decimal::from_i64(stake.pos_source_amount.as_sat() as i64).unwrap()
-                });
-            }
-        });
+        pending_stakes
+            .iter()
+            .inspect(|stake| trace!("{}", stake.blockheight))
+            .for_each(|stake| {
+                if payload.contains_key(&stake.mined_by) {
+                    trace!("adding work to staker to undo stake punishment");
+                    payload.entry(stake.mined_by.clone()).and_modify(|v| {
+                        debug!(
+                            "pos_source_amount: {}",
+                            stake.pos_source_amount.as_sat() as i64
+                        );
+                        debug!("sum: {}", v);
+                        *v += Decimal::from_i64(stake.pos_source_amount.as_sat() as i64).unwrap()
+                    });
+                }
+            });
 
         debug!("{:#?}", payload);
 
@@ -376,80 +367,81 @@ pub async fn add_work(
     Ok(())
 }
 
-pub async fn get_deltas(
-    client: &Client,
-    addresses: &[&Address],
-    last_blockheight: u64,
-    current_blockheight: u64,
-) -> Result<BTreeMap<u64, (Address, Decimal)>, Report> {
-    let address_deltas =
-        client.get_address_deltas(addresses, Some(last_blockheight - 150), Some(999999))?;
+// pub async fn get_deltas(
+//     client: &Client,
+//     addresses: &[&Address],
+//     last_blockheight: u64,
+//     current_blockheight: u64,
+// ) -> Result<BTreeMap<u64, (Address, Decimal)>, Report> {
+//     let address_deltas =
+//         client.get_address_deltas(addresses, Some(last_blockheight - 150), Some(999999))?;
 
-    let mut deltas_map = BTreeMap::new();
+//     let mut deltas_map = BTreeMap::new();
 
-    for delta in address_deltas.into_iter() {
-        // ignore zeroes as it doesn't change the staking balance
-        if delta.satoshis != SignedAmount::ZERO {
-            // find out about amounts received that will become eligible in the blocks between last_blockheight and current_blockheight
-            // to do this, we need to go back 150 blocks in the past and see if any receives came in (spending == false)
-            if delta.height < last_blockheight as i64 {
-                if delta.spending == false {
-                    debug!(
-                        "increase eligible staking balance with {} at {}",
-                        // delta.height,
-                        delta.satoshis,
-                        delta.height + 150,
-                    );
+//     for delta in address_deltas.into_iter() {
+//         // ignore zeroes as it doesn't change the staking balance
+//         if delta.satoshis != SignedAmount::ZERO {
+//             // find out about amounts received that will become eligible in the blocks between
+//             // last_blockheight and current_blockheight
+//             // to do this, we need to go back 150 blocks in the past and see if any receives came in (spending == false)
+//             if delta.height < last_blockheight as i64 {
+//                 if delta.spending == false {
+//                     debug!(
+//                         "increase eligible staking balance with {} at {}",
+//                         // delta.height,
+//                         delta.satoshis,
+//                         delta.height + 150,
+//                     );
 
-                    deltas_map.insert(
-                        delta.height as u64 + 150,
-                        (
-                            delta.address.clone(),
-                            Decimal::from_i64(delta.satoshis.as_sat()).unwrap(),
-                        ),
-                    );
-                }
-            }
+//                     deltas_map.insert(
+//                         delta.height as u64 + 150,
+//                         (
+//                             delta.address.clone(),
+//                             Decimal::from_i64(delta.satoshis.as_sat()).unwrap(),
+//                         ),
+//                     );
+//                 }
+//             }
 
-            // now all the deltas count:
-            // spending == true > decrease the balance at that height; it becomes ineligible for staking
-            // spending == false > increase the balance at this height + 150, but don't do it when
-            // it exceeds current_blockheight as the main thread already handles new incoming blocks
-            if delta.height >= last_blockheight as i64 {
-                if delta.spending {
-                    debug!(
-                        "decrease eligible staking balance with {} at {}",
-                        delta.satoshis, delta.height
-                    );
-                    deltas_map.insert(
-                        delta.height as u64,
-                        (
-                            delta.address,
-                            Decimal::from_i64(delta.satoshis.as_sat()).unwrap(),
-                        ),
-                    );
-                } else {
-                    if (delta.height + 150) < current_blockheight as i64 {
-                        debug!(
-                            "increase eligible staking balance with {} at {}",
-                            delta.satoshis,
-                            delta.height + 150
-                        )
-                    }
-                    deltas_map.insert(
-                        delta.height as u64 + 150,
-                        (
-                            delta.address,
-                            Decimal::from_i64(delta.satoshis.as_sat()).unwrap(),
-                        ),
-                    );
-                }
-            }
-        }
-    }
+//             // now all the deltas count:
+//             // spending == true > decrease the balance at that height; it becomes ineligible for staking
+//             // spending == false > increase the balance at this height + 150, but don't do it when
+//             // it exceeds current_blockheight as the main thread already handles new incoming blocks
+//             if delta.height >= last_blockheight as i64 {
+//                 if delta.spending {
+//                     debug!(
+//                         "decrease eligible staking balance with {} at {}",
+//                         delta.satoshis, delta.height
+//                     );
+//                     deltas_map.insert(
+//                         delta.height as u64,
+//                         (
+//                             delta.address,
+//                             Decimal::from_i64(delta.satoshis.as_sat()).unwrap(),
+//                         ),
+//                     );
+//                 } else {
+//                     if (delta.height + 150) < current_blockheight as i64 {
+//                         debug!(
+//                             "increase eligible staking balance with {} at {}",
+//                             delta.satoshis,
+//                             delta.height + 150
+//                         )
+//                     }
+//                     deltas_map.insert(
+//                         delta.height as u64 + 150,
+//                         (
+//                             delta.address,
+//                             Decimal::from_i64(delta.satoshis.as_sat()).unwrap(),
+//                         ),
+//                     );
+//                 }
+//             }
+//         }
+//     }
 
-    Ok(deltas_map)
-}
+//     Ok(deltas_map)
+// }
 
 #[instrument(skip(pool, client, bot_identity_address, interval, nats_client))]
 pub async fn process_payments(
