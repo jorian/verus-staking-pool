@@ -132,7 +132,6 @@ impl PayoutManager {
 
     pub fn prepare_payment<'a>(
         payout_members: &HashMap<Address, Vec<PayoutMember>>,
-        client: &Client,
     ) -> Result<Vec<SendCurrencyOutput<'a>>, Report> {
         let payment_vouts = payout_members
             .iter()

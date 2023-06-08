@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::time::Duration as TimeDuration;
 
 use color_eyre::Report;
@@ -8,10 +8,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, trace};
 use vrsc_rpc::{
-    json::{
-        vrsc::{Address, SignedAmount},
-        Block, TransactionVout, ValidationType,
-    },
+    json::{vrsc::Address, Block, TransactionVout, ValidationType},
     Client, RpcApi,
 };
 
@@ -359,82 +356,6 @@ pub async fn add_work(
     Ok(())
 }
 
-// pub async fn get_deltas(
-//     client: &Client,
-//     addresses: &[&Address],
-//     last_blockheight: u64,
-//     current_blockheight: u64,
-// ) -> Result<BTreeMap<u64, (Address, Decimal)>, Report> {
-//     let address_deltas =
-//         client.get_address_deltas(addresses, Some(last_blockheight - 150), Some(999999))?;
-
-//     let mut deltas_map = BTreeMap::new();
-
-//     for delta in address_deltas.into_iter() {
-//         // ignore zeroes as it doesn't change the staking balance
-//         if delta.satoshis != SignedAmount::ZERO {
-//             // find out about amounts received that will become eligible in the blocks between
-//             // last_blockheight and current_blockheight
-//             // to do this, we need to go back 150 blocks in the past and see if any receives came in (spending == false)
-//             if delta.height < last_blockheight as i64 {
-//                 if delta.spending == false {
-//                     debug!(
-//                         "increase eligible staking balance with {} at {}",
-//                         // delta.height,
-//                         delta.satoshis,
-//                         delta.height + 150,
-//                     );
-
-//                     deltas_map.insert(
-//                         delta.height as u64 + 150,
-//                         (
-//                             delta.address.clone(),
-//                             Decimal::from_i64(delta.satoshis.as_sat()).unwrap(),
-//                         ),
-//                     );
-//                 }
-//             }
-
-//             // now all the deltas count:
-//             // spending == true > decrease the balance at that height; it becomes ineligible for staking
-//             // spending == false > increase the balance at this height + 150, but don't do it when
-//             // it exceeds current_blockheight as the main thread already handles new incoming blocks
-//             if delta.height >= last_blockheight as i64 {
-//                 if delta.spending {
-//                     debug!(
-//                         "decrease eligible staking balance with {} at {}",
-//                         delta.satoshis, delta.height
-//                     );
-//                     deltas_map.insert(
-//                         delta.height as u64,
-//                         (
-//                             delta.address,
-//                             Decimal::from_i64(delta.satoshis.as_sat()).unwrap(),
-//                         ),
-//                     );
-//                 } else {
-//                     if (delta.height + 150) < current_blockheight as i64 {
-//                         debug!(
-//                             "increase eligible staking balance with {} at {}",
-//                             delta.satoshis,
-//                             delta.height + 150
-//                         )
-//                     }
-//                     deltas_map.insert(
-//                         delta.height as u64 + 150,
-//                         (
-//                             delta.address,
-//                             Decimal::from_i64(delta.satoshis.as_sat()).unwrap(),
-//                         ),
-//                     );
-//                 }
-//             }
-//         }
-//     }
-
-//     Ok(deltas_map)
-// }
-
 #[instrument(skip(pool, client, bot_identity_address, interval, nats_client))]
 pub async fn process_payments(
     pool: PgPool,
@@ -453,7 +374,7 @@ pub async fn process_payments(
         if let Some(eligible) =
             PayoutManager::get_eligible_for_payout(&pool, &currencyid.to_string()).await?
         {
-            let outputs = PayoutManager::prepare_payment(&eligible, &client)?;
+            let outputs = PayoutManager::prepare_payment(&eligible)?;
             debug!("outputs: {outputs:#?}");
 
             if let Some(txid) =
