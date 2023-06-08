@@ -69,6 +69,8 @@ pub struct CoinConfig {
     pub zmq_port_blocknotify: u16,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub default_min_payout: u64,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    pub payout_interval: u64,
     pub testnet: bool,
     pub pool_identity_address: Address,
     pub rpc_user: String,

@@ -203,6 +203,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             let currencyid = cs.chain.currencyid.clone();
             let pool_identity_address = cs.pool_identity_address.clone();
             let nats_client = cs.nats_client.clone();
+            let payout_interval = cs.config.payout_interval;
             async move {
                 if let Err(e) = util::process_payments(
                     pool,
@@ -210,7 +211,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     nats_client,
                     currencyid,
                     pool_identity_address,
-                    TimeDuration::from_secs(60 * 60),
+                    TimeDuration::from_secs(payout_interval),
                 )
                 .await
                 {
