@@ -108,7 +108,12 @@ impl PayoutManager {
             debug!("{:#?}", &subscribers);
 
             for subscriber in subscribers {
-                let min_payout = subscriber.min_payout;
+                let min_payout = if &subscriber.status == "unsubscribed" {
+                    Amount::ZERO
+                } else {
+                    subscriber.min_payout
+                };
+
                 if payout_members_map
                     .get(&subscriber.identity_address)
                     .unwrap() // unwrap because we just got subscribers based on payout_members
