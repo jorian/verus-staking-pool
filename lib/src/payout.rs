@@ -77,7 +77,7 @@ impl Payout {
             debug!("shared_amount_minus_fee: {shared_amount_minus_fee:?}");
 
             let mut shared_amount_minus_fee = shared_amount_minus_fee
-                .round_dp_with_strategy(8, rust_decimal::RoundingStrategy::ToZero);
+                .round_dp_with_strategy(8, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
 
             shared_amount_minus_fee.rescale(8);
             fee_amount.rescale(8);
@@ -364,6 +364,73 @@ mod tests {
 
         assert!(payout.members.contains(&charlie));
         assert_eq!(payout.pool_fee_amount, Amount::from_sat(6_001_000));
+
+        Ok(())
+    }
+
+    #[sqlx::test(fixtures("stakes"), migrator = "crate::MIGRATOR")]
+    #[traced_test]
+    fn random_numbers(pool: PgPool) -> sqlx::Result<()> {
+        let stake = database::get_stake(&pool, "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV", 22222)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mut stake_members = vec![];
+        stake_members.push(StakeMember {
+            identity_address: Address::from_str(ALICE).unwrap(),
+            shares: Decimal::from_i64(118058969151204).unwrap(),
+            fee: Decimal::from_f32(0.05).unwrap(),
+        });
+
+        stake_members.push(StakeMember {
+            identity_address: Address::from_str(BOB).unwrap(),
+            shares: Decimal::from_i64(226369800917454).unwrap(),
+            fee: Decimal::from_f32(0.05).unwrap(),
+        });
+
+        let payout = Payout::new(
+            &stake,
+            Decimal::ZERO,
+            stake_members,
+            Address::from_str(POOL_ADDRESS).unwrap(),
+        )
+        .unwrap();
+
+        debug!("{payout:#?}");
+
+        let alice = PayoutMember {
+            blockhash: BlockHash::from_str(
+                "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e1",
+            )
+            .unwrap(),
+
+            identityaddress: Address::from_str(ALICE).unwrap(),
+            reward: Amount::from_sat(2_500_831_271),
+            shares: Decimal::from_i64(118_058_969_151_204).unwrap(),
+            fee: Amount::from_sat(131_622_698),
+            txid: None,
+        };
+
+        assert!(payout.members.contains(&alice));
+
+        let bob = PayoutMember {
+            blockhash: BlockHash::from_str(
+                "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e1",
+            )
+            .unwrap(),
+
+            identityaddress: Address::from_str(BOB).unwrap(),
+            reward: Amount::from_sat(4_795_168_729),
+            shares: Decimal::from_i64(226_369_800_917_454).unwrap(),
+            fee: Amount::from_sat(252_377_302),
+            txid: None,
+        };
+
+        assert!(payout.members.contains(&alice));
+        assert!(payout.members.contains(&bob));
+
+        assert_eq!(payout.pool_fee_amount, Amount::from_sat(384_000_000));
 
         Ok(())
     }
