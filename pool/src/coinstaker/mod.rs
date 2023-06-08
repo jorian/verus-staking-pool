@@ -260,6 +260,19 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                             }
                         }
 
+                        let pending_stakes = database::get_pending_stakes(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                        )
+                        .await?;
+
+                        util::check_for_maturity(
+                            cs.chain.clone(),
+                            &pending_stakes,
+                            cs.get_mpsc_sender(),
+                        )
+                        .await?;
+
                         // break if daemon is not staking
                         if !client.get_mining_info()?.staking {
                             warn!("daemon not staking, not counting work");
@@ -274,18 +287,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         // ideally, you would want to keep it in memory and update the memory during these checks,
                         // but then we get to manage 2 different states;
                         // the database and the in-memory temporary state.
-                        let pending_stakes = database::get_pending_stakes(
-                            &cs.pool,
-                            &cs.chain.currencyid.to_string(),
-                        )
-                        .await?;
-
-                        util::check_for_maturity(
-                            cs.chain.clone(),
-                            &pending_stakes,
-                            cs.get_mpsc_sender(),
-                        )
-                        .await?;
 
                         if let Err(e) =
                             util::check_for_stake(&block, &active_subscribers, &mut cs).await
