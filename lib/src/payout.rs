@@ -18,6 +18,7 @@ use crate::{PayoutMember, Stake, StakeMember};
 pub struct Payout {
     pub currencyid: Address,
     pub blockhash: BlockHash,
+    pub blockheight: u64,
     pub total_work: Decimal,
     pub amount: Amount,
     // the difference between `amount` and the rewards for every payoutmember results in the pool fee:
@@ -84,6 +85,7 @@ impl Payout {
 
             payout_members.push(PayoutMember {
                 blockhash: stake.blockhash,
+                blockheight: stake.blockheight,
                 identityaddress: member.identity_address,
                 reward: Amount::from_vrsc(shared_amount_minus_fee.to_f64().unwrap())?,
                 shares: member.shares,
@@ -112,6 +114,7 @@ impl Payout {
         Ok(Self {
             currencyid: stake.currencyid.clone(),
             blockhash: stake.blockhash.clone(),
+            blockheight: stake.blockheight,
             total_work: shares_sum,
             amount: stake.amount,
             pool_fee_amount,
@@ -209,7 +212,7 @@ mod tests {
                 "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
             )
             .unwrap(),
-
+            blockheight: 513251,
             identityaddress: Address::from_str(ALICE).unwrap(),
             reward: Amount::from_sat(594_099_000),
             shares: Decimal::from_f64(123.456).unwrap(),
@@ -256,7 +259,7 @@ mod tests {
                 "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
             )
             .unwrap(),
-
+            blockheight: 513251,
             identityaddress: Address::from_str(ALICE).unwrap(),
             reward: Amount::from_sat(297_049_500),
             shares: Decimal::from_f64(5.0).unwrap(),
@@ -271,7 +274,7 @@ mod tests {
                 "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
             )
             .unwrap(),
-
+            blockheight: 513251,
             identityaddress: Address::from_str(ALICE).unwrap(),
             reward: Amount::from_sat(297_049_500),
             shares: Decimal::from_f64(5.0).unwrap(),
@@ -324,7 +327,7 @@ mod tests {
                 "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
             )
             .unwrap(),
-
+            blockheight: 513251,
             identityaddress: Address::from_str(ALICE).unwrap(),
             reward: Amount::from_sat(198_033_000),
             shares: Decimal::from_f64(5.0).unwrap(),
@@ -339,7 +342,7 @@ mod tests {
                 "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
             )
             .unwrap(),
-
+            blockheight: 513251,
             identityaddress: Address::from_str(ALICE).unwrap(),
             reward: Amount::from_sat(198_033_000),
             shares: Decimal::from_f64(5.0).unwrap(),
@@ -354,7 +357,7 @@ mod tests {
                 "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0",
             )
             .unwrap(),
-
+            blockheight: 513251,
             identityaddress: Address::from_str(ALICE).unwrap(),
             reward: Amount::from_sat(198_033_000),
             shares: Decimal::from_f64(5.0).unwrap(),
@@ -404,6 +407,7 @@ mod tests {
                 "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e1",
             )
             .unwrap(),
+            blockheight: 22222,
 
             identityaddress: Address::from_str(ALICE).unwrap(),
             reward: Amount::from_sat(2_500_831_271),
@@ -419,6 +423,7 @@ mod tests {
                 "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e1",
             )
             .unwrap(),
+            blockheight: 22222,
 
             identityaddress: Address::from_str(BOB).unwrap(),
             reward: Amount::from_sat(4_795_168_729),

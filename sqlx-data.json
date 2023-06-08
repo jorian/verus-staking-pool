@@ -330,6 +330,25 @@
     },
     "query": "WITH round_to_move AS (\n            SELECT currencyid, round, address, shares\n            FROM work \n            WHERE currencyid = $1 AND round = $2\n        )\n        INSERT INTO work (currencyid, round, address, shares) \n        SELECT currencyid, 0, address, shares\n        FROM round_to_move\n        ON CONFLICT (currencyid, round, address)\n        DO UPDATE SET shares = work.shares + EXCLUDED.shares"
   },
+  "5f70585f089eaeaab66f8d6f0849f750c832cea87b91b7bb25e298b2e9cc764c": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Varchar",
+          "Varchar",
+          "Int8",
+          "Int8",
+          "Numeric",
+          "Int8",
+          "Int8",
+          "Int8"
+        ]
+      }
+    },
+    "query": "INSERT INTO payouts(\n            currencyid, blockhash, blockheight, amount, totalwork, pool_fee_amount, amount_paid_to_subs, n_subs\n        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+  },
   "7dcb1ca4e3287c0025b66d0d8c7de4c04b765f931f91f59c9395855f416449c4": {
     "describe": {
       "columns": [],
@@ -488,24 +507,6 @@
     },
     "query": "SELECT * FROM subscriptions WHERE currencyid = $1 AND identityaddress = $2"
   },
-  "ae83d9935c1243bb455203971f01037cb6a1dd4974b481be3722715eb451bb05": {
-    "describe": {
-      "columns": [],
-      "nullable": [],
-      "parameters": {
-        "Left": [
-          "Varchar",
-          "Varchar",
-          "Int8",
-          "Numeric",
-          "Int8",
-          "Int8",
-          "Int8"
-        ]
-      }
-    },
-    "query": "INSERT INTO payouts(\n            currencyid, blockhash, amount, totalwork, pool_fee_amount, amount_paid_to_subs, n_subs\n        ) VALUES ($1, $2, $3, $4, $5, $6, $7)"
-  },
   "b050c5ecca784893ef292f8a0413b1f0d360b30fcd387473922a6bcddd0db40b": {
     "describe": {
       "columns": [],
@@ -567,6 +568,11 @@
           "name": "payment_txid",
           "ordinal": 8,
           "type_info": "Varchar"
+        },
+        {
+          "name": "blockheight",
+          "ordinal": 9,
+          "type_info": "Int8"
         }
       ],
       "nullable": [
@@ -578,7 +584,8 @@
         false,
         false,
         false,
-        true
+        true,
+        false
       ],
       "parameters": {
         "Left": [
@@ -804,6 +811,11 @@
           "name": "payment_txid",
           "ordinal": 8,
           "type_info": "Varchar"
+        },
+        {
+          "name": "blockheight",
+          "ordinal": 9,
+          "type_info": "Int8"
         }
       ],
       "nullable": [
@@ -815,7 +827,8 @@
         false,
         false,
         false,
-        true
+        true,
+        false
       ],
       "parameters": {
         "Left": [

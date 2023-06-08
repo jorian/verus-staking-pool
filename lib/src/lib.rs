@@ -21,6 +21,7 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../migrations");
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PayoutMember {
     pub blockhash: BlockHash,
+    pub blockheight: u64,
     pub identityaddress: Address,
     #[serde(with = "as_sat")]
     pub reward: Amount,

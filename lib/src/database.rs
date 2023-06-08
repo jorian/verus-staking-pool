@@ -611,10 +611,11 @@ pub async fn get_latest_state_for_subscribers(
 pub async fn insert_payout(pool: &PgPool, payout: &Payout) -> Result<(), Report> {
     sqlx::query!(
         "INSERT INTO payouts(
-            currencyid, blockhash, amount, totalwork, pool_fee_amount, amount_paid_to_subs, n_subs
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            currencyid, blockhash, blockheight, amount, totalwork, pool_fee_amount, amount_paid_to_subs, n_subs
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         &payout.currencyid.to_string(),
         &payout.blockhash.to_string(),
+        payout.blockheight as i64,
         payout.amount.as_sat() as i64,
         &payout.total_work,
         payout.pool_fee_amount.as_sat() as i64,
@@ -630,17 +631,18 @@ pub async fn insert_payout(pool: &PgPool, payout: &Payout) -> Result<(), Report>
 pub async fn insert_payout_members(pool: &PgPool, payout: &Payout) -> Result<(), Report> {
     let currencyid = payout.currencyid.to_string();
     let blockhash = payout.blockhash.to_string();
-
+    let blockheight = payout.blockheight as i64;
     let mut tx = pool.begin().await?;
 
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO payout_members (currencyid, blockhash, identityaddress, shares, reward, fee) ",
+        "INSERT INTO payout_members (currencyid, blockhash, blockheight, identityaddress, shares, reward, fee) ",
     );
 
     let tuples = payout.members.iter().map(|member| {
         (
             &currencyid,
             &blockhash,
+            blockheight,
             member.identityaddress.to_string(),
             member.shares,
             member.reward.as_sat() as i64,
@@ -654,7 +656,8 @@ pub async fn insert_payout_members(pool: &PgPool, payout: &Payout) -> Result<(),
             .push_bind(tuple.2)
             .push_bind(tuple.3)
             .push_bind(tuple.4)
-            .push_bind(tuple.5);
+            .push_bind(tuple.5)
+            .push_bind(tuple.6);
     });
 
     query_builder.build().execute(&mut tx).await?;
@@ -680,6 +683,7 @@ pub async fn get_payout_members_without_payment(
         .iter()
         .map(|row| PayoutMember {
             blockhash: BlockHash::from_str(&row.blockhash).unwrap(),
+            blockheight: row.blockheight as u64,
             identityaddress: Address::from_str(&row.identityaddress).unwrap(),
             reward: Amount::from_sat(row.reward as u64),
             shares: row.shares,
@@ -759,6 +763,7 @@ pub async fn get_payouts(
     .map(|row| {
         Ok(PayoutMember {
             blockhash: BlockHash::from_str(&row.blockhash).unwrap(),
+            blockheight: row.blockheight as u64,
             identityaddress: Address::from_str(&row.identityaddress).unwrap(),
             reward: Amount::from_sat(row.reward.try_into()?),
             shares: row.shares,
