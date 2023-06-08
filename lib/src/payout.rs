@@ -88,6 +88,7 @@ impl Payout {
                 reward: Amount::from_vrsc(shared_amount_minus_fee.to_f64().unwrap())?,
                 shares: member.shares,
                 fee: Amount::from_vrsc(fee_amount.to_f64().unwrap())?,
+                txid: None,
             });
         }
 
@@ -213,6 +214,7 @@ mod tests {
             reward: Amount::from_sat(594_099_000),
             shares: Decimal::from_f64(123.456).unwrap(),
             fee: Amount::from_sat(6_001_000),
+            txid: None,
         });
 
         assert_eq!(payout.members, to_test_against);
@@ -259,6 +261,7 @@ mod tests {
             reward: Amount::from_sat(297_049_500),
             shares: Decimal::from_f64(5.0).unwrap(),
             fee: Amount::from_sat(3_000_500),
+            txid: None,
         };
 
         assert!(payout.members.contains(&alice));
@@ -273,6 +276,7 @@ mod tests {
             reward: Amount::from_sat(297_049_500),
             shares: Decimal::from_f64(5.0).unwrap(),
             fee: Amount::from_sat(3_000_500),
+            txid: None,
         };
 
         assert!(payout.members.contains(&bob));
@@ -325,6 +329,7 @@ mod tests {
             reward: Amount::from_sat(198_033_000),
             shares: Decimal::from_f64(5.0).unwrap(),
             fee: Amount::from_sat(2_000_333),
+            txid: None,
         };
 
         assert!(payout.members.contains(&alice));
@@ -339,6 +344,7 @@ mod tests {
             reward: Amount::from_sat(198_033_000),
             shares: Decimal::from_f64(5.0).unwrap(),
             fee: Amount::from_sat(2_000_333),
+            txid: None,
         };
 
         assert!(payout.members.contains(&bob));
@@ -353,6 +359,7 @@ mod tests {
             reward: Amount::from_sat(198_033_000),
             shares: Decimal::from_f64(5.0).unwrap(),
             fee: Amount::from_sat(2_000_333),
+            txid: None,
         };
 
         assert!(payout.members.contains(&charlie));

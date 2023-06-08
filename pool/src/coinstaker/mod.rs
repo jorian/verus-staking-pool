@@ -270,7 +270,8 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         // - check_for_maturity checks if any pending_stakes are stale or have matured.
                         // - this information is required when to add work, but the state is written to the database, and so we need to acquire
                         // this state again from the database to do a proper work calculation
-                        // ideally, you would want to keep it in memory and update the memory during these checks, but then we get to manage 2 different states;
+                        // ideally, you would want to keep it in memory and update the memory during these checks,
+                        // but then we get to manage 2 different states;
                         // the database and the in-memory temporary state.
                         let pending_stakes = database::get_pending_stakes(
                             &cs.pool,
@@ -430,24 +431,25 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                     &subscriptions
                                         .into_iter()
                                         .filter(|s| {
-                                            (&s.status == "subscribed")
-                                                && if let Ok(identity) = client
-                                                    .get_identity_history(
-                                                        &s.identity_address.to_string(),
-                                                        0,
-                                                        9999999,
-                                                    )
-                                                {
-                                                    let block = client
-                                                        .get_block_by_height(mining_info.blocks, 1)
-                                                        .unwrap();
+                                            let is_subscribed = &s.status == "subscribed";
+                                            let is_cooled_down = if let Ok(identity) = client
+                                                .get_identity_history(
+                                                    &s.identity_address.to_string(),
+                                                    0,
+                                                    9999999,
+                                                ) {
+                                                let block = client
+                                                    .get_block_by_height(mining_info.blocks, 2)
+                                                    .unwrap();
 
-                                                    identity.blockheight
-                                                        < block.height.checked_sub(150).unwrap_or(0)
-                                                            as i64
-                                                } else {
-                                                    false
-                                                }
+                                                identity.blockheight
+                                                    < block.height.checked_sub(150).unwrap_or(0)
+                                                        as i64
+                                            } else {
+                                                false
+                                            };
+
+                                            is_subscribed && is_cooled_down
                                         })
                                         .map(|sub| sub.identity_address)
                                         .collect::<Vec<Address>>(),
@@ -559,7 +561,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                                 "identity_address": identity.identity.identityaddress.clone(),
                                                 "currency_id": cs.chain.currencyid.clone(),
                                                 "currency_name": cs.chain.name
-
                                             }),
                                         };
                                         cs.nats_client

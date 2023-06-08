@@ -28,6 +28,7 @@ pub struct PayoutMember {
     // fee is in basis points: 5% should be entered as 0.05
     #[serde(with = "as_sat")]
     pub fee: Amount,
+    pub txid: Option<Txid>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

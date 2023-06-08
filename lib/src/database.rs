@@ -684,6 +684,10 @@ pub async fn get_payout_members_without_payment(
             reward: Amount::from_sat(row.reward as u64),
             shares: row.shares,
             fee: Amount::from_sat(row.fee as u64),
+            txid: row
+                .payment_txid
+                .as_ref()
+                .map(|s| Txid::from_str(&s).unwrap()),
         })
         .collect::<Vec<PayoutMember>>();
 
@@ -759,6 +763,10 @@ pub async fn get_payouts(
             reward: Amount::from_sat(row.reward.try_into()?),
             shares: row.shares,
             fee: Amount::from_sat(row.fee.try_into()?),
+            txid: row
+                .payment_txid
+                .as_ref()
+                .map(|s| Txid::from_str(&s).unwrap()),
         })
     })
     .collect::<Result<Vec<_>, _>>()
