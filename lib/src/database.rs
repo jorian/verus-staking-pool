@@ -611,7 +611,7 @@ pub async fn get_latest_state_for_subscribers(
 pub async fn insert_payout(pool: &PgPool, payout: &Payout) -> Result<(), Report> {
     sqlx::query!(
         "INSERT INTO payouts(
-            currencyid, blockhash, amount, totalwork, bot_fee_amount, amount_paid_to_subs, n_subs
+            currencyid, blockhash, amount, totalwork, pool_fee_amount, amount_paid_to_subs, n_subs
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         &payout.currencyid.to_string(),
         &payout.blockhash.to_string(),

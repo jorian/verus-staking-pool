@@ -356,13 +356,13 @@ pub async fn add_work(
     Ok(())
 }
 
-#[instrument(skip(pool, client, bot_identity_address, interval, nats_client))]
+#[instrument(skip(pool, client, pool_identity_address, interval, nats_client))]
 pub async fn process_payments(
     pool: PgPool,
     client: Client,
     nats_client: async_nats::Client,
     currencyid: Address,
-    bot_identity_address: Address,
+    pool_identity_address: Address,
     interval: TimeDuration,
 ) -> Result<(), Report> {
     let mut interval = tokio::time::interval(interval);
@@ -378,7 +378,7 @@ pub async fn process_payments(
             debug!("outputs: {outputs:#?}");
 
             if let Some(txid) =
-                PayoutManager::send_payment(outputs, &bot_identity_address, &client).await?
+                PayoutManager::send_payment(outputs, &pool_identity_address, &client).await?
             {
                 if let Err(e) = database::update_payment_members(
                     &pool,

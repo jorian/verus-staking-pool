@@ -36,8 +36,8 @@ use crate::{coinstaker::error::CoinStakerError, payoutmanager::PayoutManager};
 #[derive(Debug)]
 pub struct CoinStaker {
     pub chain: Chain,
-    pub bot_identity_address: Address,
-    bot_fee_discount: Decimal,
+    pub pool_identity_address: Address,
+    pool_fee_discount: Decimal,
     _default_tx_fee: Amount,
     config: CoinConfig,
     cs_tx: mpsc::Sender<CoinStakerMessage>,
@@ -57,12 +57,12 @@ impl CoinStaker {
         let nats_client = async_nats::connect("nats://localhost:4222".to_string())
             .await
             .expect("a nats client");
-        let bot_identity_address = coin_config.bot_identity_address.clone();
+        let pool_identity_address = coin_config.pool_identity_address.clone();
 
         Self {
             chain: Chain::from(&coin_config),
-            bot_identity_address,
-            bot_fee_discount: Decimal::from_f32(coin_config.bot_fee_discount)
+            pool_identity_address,
+            pool_fee_discount: Decimal::from_f32(coin_config.pool_fee_discount)
                 .unwrap_or(Decimal::ZERO),
             _default_tx_fee: Amount::from_sat(coin_config.default_tx_fee as u64),
             config: coin_config,
@@ -201,7 +201,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             let pool = cs.pool.clone();
             let client = cs.chain.verusd_client()?;
             let currencyid = cs.chain.currencyid.clone();
-            let bot_identity_address = cs.bot_identity_address.clone();
+            let pool_identity_address = cs.pool_identity_address.clone();
             let nats_client = cs.nats_client.clone();
             async move {
                 if let Err(e) = util::process_payments(
@@ -209,7 +209,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     client,
                     nats_client,
                     currencyid,
-                    bot_identity_address,
+                    pool_identity_address,
                     TimeDuration::from_secs(60 * 60),
                 )
                 .await
@@ -366,8 +366,8 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     tokio::spawn({
                         let pool = cs.pool.clone();
                         let stake = stake.clone();
-                        let bot_fee_discount = cs.bot_fee_discount;
-                        let bot_identity_address = cs.bot_identity_address.clone();
+                        let pool_fee_discount = cs.pool_fee_discount;
+                        let pool_identity_address = cs.pool_identity_address.clone();
                         let nats_client = cs.nats_client.clone();
                         let chain_name = cs.chain.name.clone();
 
@@ -380,8 +380,8 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                             let payout = PayoutManager::create_payout(
                                 &pool,
                                 &stake,
-                                bot_fee_discount,
-                                bot_identity_address,
+                                pool_fee_discount,
+                                pool_identity_address,
                             )
                             .await?;
 
@@ -471,8 +471,8 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                 }
                 CoinStakerMessage::ProcessPayments() => {}
                 CoinStakerMessage::SetFeeDiscount(os_tx, new_fee) => {
-                    cs.bot_fee_discount = Decimal::from_f32(new_fee).unwrap_or(Decimal::ZERO);
-                    if let Err(e) = os_tx.send(cs.bot_fee_discount.to_f32().unwrap()) {
+                    cs.pool_fee_discount = Decimal::from_f32(new_fee).unwrap_or(Decimal::ZERO);
+                    if let Err(e) = os_tx.send(cs.pool_fee_discount.to_f32().unwrap()) {
                         error!("{e:?}");
                     }
 
@@ -728,7 +728,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                         &identity.fullyqualifiedname,
                                         "pending",
                                         &address.to_string(),
-                                        cs.chain.default_bot_fee,
+                                        cs.chain.default_pool_fee,
                                         cs.chain.default_min_payout,
                                     )
                                     .await?;

@@ -43,8 +43,8 @@ impl PayoutManager {
     pub async fn create_payout(
         pool: &PgPool,
         stake: &Stake,
-        bot_fee_discount: Decimal,
-        bot_identity_address: Address,
+        pool_fee_discount: Decimal,
+        pool_identity_address: Address,
     ) -> Result<Payout, Report> {
         // need to gather the work that belongs to this blockheight in order to do the calculation
         let work = database::get_work_and_fee_by_round(
@@ -56,7 +56,7 @@ impl PayoutManager {
 
         debug!("{:#?}", &work);
 
-        let payout = Payout::new(&stake, bot_fee_discount, work, bot_identity_address);
+        let payout = Payout::new(&stake, pool_fee_discount, work, pool_identity_address);
 
         debug!("{:#?}", payout);
 

@@ -41,7 +41,7 @@ pub struct Chain {
     pub rpc_user: String,
     pub rpc_password: String,
     pub rpc_port: u16,
-    pub default_bot_fee: f32,    // in basis points (5% = 0.05)
+    pub default_pool_fee: f32,   // in basis points (5% = 0.05)
     pub default_tx_fee: u32,     // in basis points (5% = 0.05)
     pub default_min_payout: u64, // in sats
 }

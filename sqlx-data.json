@@ -488,6 +488,24 @@
     },
     "query": "SELECT * FROM subscriptions WHERE currencyid = $1 AND identityaddress = $2"
   },
+  "ae83d9935c1243bb455203971f01037cb6a1dd4974b481be3722715eb451bb05": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Varchar",
+          "Varchar",
+          "Int8",
+          "Numeric",
+          "Int8",
+          "Int8",
+          "Int8"
+        ]
+      }
+    },
+    "query": "INSERT INTO payouts(\n            currencyid, blockhash, amount, totalwork, pool_fee_amount, amount_paid_to_subs, n_subs\n        ) VALUES ($1, $2, $3, $4, $5, $6, $7)"
+  },
   "b050c5ecca784893ef292f8a0413b1f0d360b30fcd387473922a6bcddd0db40b": {
     "describe": {
       "columns": [],
@@ -570,24 +588,6 @@
       }
     },
     "query": "SELECT * \n        FROM payout_members \n        WHERE currencyid = $1 \n        AND identityaddress IN (SELECT * FROM UNNEST($2::text[]))"
-  },
-  "ccda9de794ad20d1ddb98039348a82a8be668e37eb6ddd62cb3e41c8b0456f89": {
-    "describe": {
-      "columns": [],
-      "nullable": [],
-      "parameters": {
-        "Left": [
-          "Varchar",
-          "Varchar",
-          "Int8",
-          "Numeric",
-          "Int8",
-          "Int8",
-          "Int8"
-        ]
-      }
-    },
-    "query": "INSERT INTO payouts(\n            currencyid, blockhash, amount, totalwork, bot_fee_amount, amount_paid_to_subs, n_subs\n        ) VALUES ($1, $2, $3, $4, $5, $6, $7)"
   },
   "d1a89a5434b416953b322ae28167e4c36543b6f2bf976575f7801bb861833399": {
     "describe": {

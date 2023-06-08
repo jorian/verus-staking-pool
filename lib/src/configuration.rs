@@ -62,15 +62,15 @@ pub struct CoinConfig {
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub default_tx_fee: u32,
     #[serde(deserialize_with = "deserialize_number_from_string")]
-    pub default_bot_fee: f32,
+    pub default_pool_fee: f32,
     #[serde(deserialize_with = "deserialize_number_from_string")]
-    pub bot_fee_discount: f32,
+    pub pool_fee_discount: f32,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub zmq_port_blocknotify: u16,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub default_min_payout: u64,
     pub testnet: bool,
-    pub bot_identity_address: Address,
+    pub pool_identity_address: Address,
     pub rpc_user: String,
     pub rpc_password: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]
@@ -84,7 +84,7 @@ impl From<&CoinConfig> for Chain {
             testnet: coin_config.testnet,
             name: coin_config.name.clone(),
             currencyidhex: coin_config.currencyidhex.clone(),
-            default_bot_fee: coin_config.default_bot_fee,
+            default_pool_fee: coin_config.default_pool_fee,
             default_tx_fee: coin_config.default_tx_fee,
             default_min_payout: coin_config.default_min_payout,
             rpc_user: coin_config.rpc_user.clone(),
