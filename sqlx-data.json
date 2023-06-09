@@ -924,6 +924,26 @@
     },
     "query": "SELECT * FROM stakes WHERE currencyid = $1 AND status = 'pending'"
   },
+  "efb9b5e11a275b52e784a6e0500c53b3eabfb598bf133ef3f122fc12ad62320d": {
+    "describe": {
+      "columns": [
+        {
+          "name": "total",
+          "ordinal": 0,
+          "type_info": "Numeric"
+        }
+      ],
+      "nullable": [
+        null
+      ],
+      "parameters": {
+        "Left": [
+          "Text"
+        ]
+      }
+    },
+    "query": "SELECT SUM (pool_fee_amount) AS total\n        FROM payouts\n        WHERE currencyid = $1"
+  },
   "fa3a057542567994f68dddc993d6d3cdda3c0f4815421b20d6380ddf5a34970f": {
     "describe": {
       "columns": [],

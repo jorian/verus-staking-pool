@@ -4,7 +4,10 @@ use poollib::{Payload, PayoutMember, Stake, Subscriber};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, trace};
-use vrsc_rpc::json::{identity::Identity, vrsc::Address};
+use vrsc_rpc::json::{
+    identity::Identity,
+    vrsc::{Address, Amount},
+};
 
 use crate::coinstaker::error::CoinStakerError;
 
@@ -249,6 +252,17 @@ pub async fn nats_server(
 
                             let resp = os_rx.await?;
                             client.publish(reply, serde_json::to_string(&resp)?.into()).await?;
+                        }
+                        "fees" => {
+                            trace!("get pool fees for {}", currencyid);
+                            let (os_tx, os_rx) = oneshot::channel::<Amount>();
+                            cs_tx
+                                .send(CoinStakerMessage::GetPoolFees(os_tx))
+                                .await?;
+
+                            let resp = os_rx.await?;
+                            debug!("fees returned: {resp:?}");
+                            client.publish(reply, serde_json::to_string(&resp.as_vrsc())?.into()).await?;
                         }
                         _ => {}
                     }

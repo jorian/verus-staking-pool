@@ -777,6 +777,20 @@ pub async fn get_payouts(
     .collect::<Result<Vec<_>, _>>()
 }
 
+pub async fn get_pool_fees(pool: &PgPool, currencyid: &str) -> Result<Amount, Report> {
+    let row = sqlx::query!(
+        "SELECT SUM (pool_fee_amount) AS total
+        FROM payouts
+        WHERE currencyid = $1",
+        currencyid
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let dec = row.total.unwrap_or(Decimal::ZERO);
+    Ok(Amount::from_sat(dec.to_i64().unwrap() as u64))
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::SubAssign;

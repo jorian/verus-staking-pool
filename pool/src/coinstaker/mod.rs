@@ -757,8 +757,17 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                     os_tx.send(payouts).unwrap();
                 }
+                CoinStakerMessage::GetPoolFees(os_tx) => {
+                    let fees =
+                        database::get_pool_fees(&cs.pool, &cs.chain.currencyid.to_string()).await?;
+
+                    os_tx.send(fees).unwrap();
+                }
             }
         }
+
+        trace!("no more coinstaker message receiver running, stopping staking");
+        cs.chain.verusd_client()?.set_generate(false, 0)?;
     } else {
         error!("{} daemon is not running", cs.chain.name);
     }
@@ -784,6 +793,7 @@ pub enum CoinStakerMessage {
     SetStaking(oneshot::Sender<()>, bool),
     NewSubscriber(oneshot::Sender<Result<Subscriber, CoinStakerError>>, String),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<String>),
+    GetPoolFees(oneshot::Sender<Amount>),
 }
 
 async fn tmq_block_listen(

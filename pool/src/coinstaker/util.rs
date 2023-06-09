@@ -8,7 +8,10 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, trace};
 use vrsc_rpc::{
-    json::{vrsc::Address, Block, TransactionVout, ValidationType},
+    json::{
+        vrsc::{Address, Amount},
+        Block, TransactionVout, ValidationType,
+    },
     Client, RpcApi,
 };
 
@@ -377,6 +380,10 @@ pub async fn process_payments(
             let outputs = PayoutManager::prepare_payment(&eligible)?;
             debug!("outputs: {outputs:#?}");
 
+            let total_amount = outputs
+                .iter()
+                .fold(Amount::ZERO, |acc, sum| acc + sum.amount);
+
             if let Some(txid) =
                 PayoutManager::send_payment(outputs, &pool_identity_address, &client).await?
             {
@@ -413,6 +420,7 @@ pub async fn process_payments(
                     data: json!({
                         "chain_name": chain_name,
                         "txid": txid.to_string(),
+                        "amount": total_amount.as_vrsc(),
                         "n_subs": eligible.len()
                     }),
                 };
