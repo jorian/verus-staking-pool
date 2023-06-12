@@ -421,46 +421,55 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     let mining_info = client.get_mining_info()?;
                     let network_supply = mining_info.stakingsupply;
                     let my_supply = if tuples.len() > 0 {
-                        let subscriptions = database::get_subscriptions(&cs.pool, &tuples).await?;
+                        let mut subscriptions =
+                            database::get_subscriptions(&cs.pool, &tuples).await?;
 
                         trace!("subscriptions found: {subscriptions:#?}");
 
-                        let lu = client
-                            .list_unspent(
-                                Some(150),
-                                Some(9999999),
-                                Some(
-                                    &subscriptions
-                                        .into_iter()
-                                        .filter(|s| {
-                                            let is_subscribed = &s.status == "subscribed";
-                                            let is_cooled_down = if let Ok(identity) = client
-                                                .get_identity_history(
-                                                    &s.identity_address.to_string(),
-                                                    0,
-                                                    9999999,
-                                                ) {
-                                                let block = client
-                                                    .get_block_by_height(mining_info.blocks, 2)
-                                                    .unwrap();
+                        subscriptions = subscriptions
+                            .into_iter()
+                            .filter(|s| {
+                                let is_subscribed = &s.status == "subscribed";
+                                let is_cooled_down = if let Ok(identity) = client
+                                    .get_identity_history(
+                                        &s.identity_address.to_string(),
+                                        0,
+                                        9999999,
+                                    ) {
+                                    let block =
+                                        client.get_block_by_height(mining_info.blocks, 2).unwrap();
 
-                                                identity.blockheight
-                                                    < block.height.checked_sub(150).unwrap_or(0)
-                                                        as i64
-                                            } else {
-                                                false
-                                            };
+                                    identity.blockheight
+                                        < block.height.checked_sub(150).unwrap_or(0) as i64
+                                } else {
+                                    false
+                                };
 
-                                            is_subscribed && is_cooled_down
-                                        })
-                                        .map(|sub| sub.identity_address)
-                                        .collect::<Vec<Address>>(),
-                                ),
-                            )?
-                            .iter()
-                            .fold(SignedAmount::ZERO, |acc, sum| acc + sum.amount);
+                                is_subscribed && is_cooled_down
+                            })
+                            .collect::<Vec<_>>();
 
-                        lu.as_vrsc()
+                        trace!("eligible subscriptions found: {subscriptions:#?}");
+
+                        if !subscriptions.is_empty() {
+                            let lu = client
+                                .list_unspent(
+                                    Some(150),
+                                    Some(9999999),
+                                    Some(
+                                        &subscriptions
+                                            .into_iter()
+                                            .map(|sub| sub.identity_address)
+                                            .collect::<Vec<Address>>(),
+                                    ),
+                                )?
+                                .iter()
+                                .fold(SignedAmount::ZERO, |acc, sum| acc + sum.amount);
+
+                            lu.as_vrsc()
+                        } else {
+                            0.0
+                        }
                     } else {
                         0.0
                     };
