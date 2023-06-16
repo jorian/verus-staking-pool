@@ -271,14 +271,13 @@ pub async fn nats_server(
                             let to_blacklist = payload.data["blacklist"].as_bool().unwrap();
                             trace!("set blacklist status for {identity} to {to_blacklist} on {currencyid}");
 
-                            // let (os_tx, os_rx) = oneshot::channel::<Amount>();
+                            let (os_tx, os_rx) = oneshot::channel::<Subscriber>();
                             cs_tx
-                                .send(CoinStakerMessage::SetBlacklist(identity, to_blacklist))
+                                .send(CoinStakerMessage::SetBlacklist(Some(os_tx), identity, to_blacklist))
                                 .await?;
 
-                            // let resp = os_rx.await?;
-                            // debug!("");
-                            client.publish(reply, serde_json::to_string(&json!({"result":"success"}))?.into()).await?;
+                            let resp = os_rx.await?;
+                            client.publish(reply, serde_json::to_string(&resp)?.into()).await?;
                         }
                         _ => {}
                     }

@@ -146,19 +146,27 @@ pub async fn update_subscriber_status(
     currencyid: &str,
     identity_address: &str,
     status: &str,
-) -> Result<(), Report> {
+) -> Result<Subscriber, Report> {
     sqlx::query!(
         "UPDATE subscriptions 
         SET status = $3
-        WHERE currencyid = $1 AND identityaddress = $2",
+        WHERE currencyid = $1 AND identityaddress = $2
+        RETURNING *",
         currencyid,
         identity_address,
         status
     )
-    .execute(pool)
-    .await?;
-
-    Ok(())
+    .fetch_one(pool)
+    .await
+    .map(|row| Subscriber {
+        currencyid: Address::from_str(&row.currencyid).unwrap(),
+        identity_address: Address::from_str(&row.identityaddress).unwrap(),
+        identity_name: row.identityname.clone(),
+        pool_address: Address::from_str(&row.pool_address).unwrap(),
+        min_payout: Amount::from_sat(row.min_payout as u64),
+        status: row.status,
+    })
+    .map_err(|e| e.into())
 }
 
 pub async fn update_subscriber_min_payout(

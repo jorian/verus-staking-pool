@@ -69,7 +69,7 @@ pub async fn check_for_maturity(
                     trace!("The transaction was spent, must be stakeguard");
                     debug!("perpetrator: {:?}", block.postxddest);
 
-                    // set the stake to "caught"
+                    // set the stake result to "stolen"
                 }
                 trace!(
                     "{}:{} not matured (blocks to maturity: {})",

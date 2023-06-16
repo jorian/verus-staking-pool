@@ -216,20 +216,6 @@
     },
     "query": "SELECT * \n        FROM stakes \n        WHERE currencyid = $1 AND created_at > $2"
   },
-  "2a9c8474af71ffc5f255ad9cd970dadca071cd0cbd3b66f2396e2becabbca8b4": {
-    "describe": {
-      "columns": [],
-      "nullable": [],
-      "parameters": {
-        "Left": [
-          "Text",
-          "Text",
-          "Text"
-        ]
-      }
-    },
-    "query": "UPDATE subscriptions \n        SET status = $3\n        WHERE currencyid = $1 AND identityaddress = $2"
-  },
   "34a24b4b76d9ed4f7de0c731a08288bf81071a0d2ee9f8d37cb904652e24e793": {
     "describe": {
       "columns": [
@@ -520,6 +506,76 @@
       }
     },
     "query": "UPDATE stakes SET status = 'processed', result = $1 WHERE currencyid = $2 AND blockhash = $3"
+  },
+  "b425f0b42dcac6d0fcdd56c1e1791f5d0cb76980857350c193d2ddeb882b6a85": {
+    "describe": {
+      "columns": [
+        {
+          "name": "identityaddress",
+          "ordinal": 0,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "identityname",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "status",
+          "ordinal": 2,
+          "type_info": "Text"
+        },
+        {
+          "name": "created_at",
+          "ordinal": 3,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "updated_at",
+          "ordinal": 4,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "currencyid",
+          "ordinal": 5,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "pool_address",
+          "ordinal": 6,
+          "type_info": "Varchar"
+        },
+        {
+          "name": "fee",
+          "ordinal": 7,
+          "type_info": "Numeric"
+        },
+        {
+          "name": "min_payout",
+          "ordinal": 8,
+          "type_info": "Int8"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Text",
+          "Text",
+          "Text"
+        ]
+      }
+    },
+    "query": "UPDATE subscriptions \n        SET status = $3\n        WHERE currencyid = $1 AND identityaddress = $2\n        RETURNING *"
   },
   "ca92a36802d1e2135a89c2b4066198913b6afc49fe5bea34d1db10f15969f25b": {
     "describe": {

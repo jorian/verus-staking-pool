@@ -372,7 +372,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     database::set_stake_result(&cs.pool, &stake).await?;
 
                     cs.get_mpsc_sender()
-                        .send(CoinStakerMessage::SetBlacklist(stake.mined_by, true))
+                        .send(CoinStakerMessage::SetBlacklist(None, stake.mined_by, true))
                         .await?;
 
                     // blacklist the user
@@ -792,9 +792,9 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                     os_tx.send(fees).unwrap();
                 }
-                CoinStakerMessage::SetBlacklist(address, blacklist) => {
+                CoinStakerMessage::SetBlacklist(opt_os_tx, address, blacklist) => {
                     trace!("Setting blacklist status for {address} to {blacklist}");
-                    // get subscriber
+
                     if let Some(subscriber) = database::get_subscriber(
                         &cs.pool,
                         &cs.chain.currencyid.to_string(),
@@ -802,33 +802,31 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     )
                     .await?
                     {
-                        if blacklist {
-                            database::update_subscriber_status(
-                                &cs.pool,
-                                &cs.chain.currencyid.to_string(),
-                                &address.to_string(),
-                                "banned",
-                            )
-                            .await?;
+                        let new_status = if blacklist {
+                            "banned"
                         } else {
-                            // unban this subscriber
-                            // run subscriber through eligibility test:
                             let client = &cs.chain.verusd_client()?;
                             let identity = client.get_identity(&address.to_string())?;
-                            let new_status =
-                                if cs.identity_is_eligible(&identity.identity, &subscriber) {
-                                    "subscribed"
-                                } else {
-                                    "unsubscribed"
-                                };
 
-                            database::update_subscriber_status(
-                                &cs.pool,
-                                &cs.chain.currencyid.to_string(),
-                                &address.to_string(),
-                                new_status,
-                            )
-                            .await?;
+                            if cs.identity_is_eligible(&identity.identity, &subscriber) {
+                                "subscribed"
+                            } else {
+                                "unsubscribed"
+                            }
+                        };
+
+                        if let Ok(subscriber) = database::update_subscriber_status(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                            &address.to_string(),
+                            new_status,
+                        )
+                        .await
+                        {
+                            debug!("subscriber updated in db: {subscriber:?}");
+                            if let Some(os_tx) = opt_os_tx {
+                                os_tx.send(subscriber).unwrap();
+                            }
                         }
                     }
                 }
@@ -864,7 +862,7 @@ pub enum CoinStakerMessage {
     NewSubscriber(oneshot::Sender<Result<Subscriber, CoinStakerError>>, String),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<String>),
     GetPoolFees(oneshot::Sender<Amount>),
-    SetBlacklist(Address, bool),
+    SetBlacklist(Option<oneshot::Sender<Subscriber>>, Address, bool),
 }
 
 async fn tmq_block_listen(
