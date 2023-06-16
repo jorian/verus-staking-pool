@@ -53,6 +53,24 @@ pub async fn check_for_maturity(
                 .await?;
         } else {
             if confirmations < 150 {
+                // if the staked transaction was spent within 150 blocks, it must have been a double stake, caught with StakeGuard.
+                // Since VerusIDs are locked, funds cannot leave the ID without unlocking it.
+                // Unlocked IDs are ignored in the pool.
+                if block
+                    .tx
+                    .first()
+                    .unwrap() // unwrap because every block has a coinbase
+                    .vout
+                    .first()
+                    .unwrap() // unwrap because every tx has a vout, and the first vout of a coinbase is the pool address
+                    .spent_tx_id
+                    .is_some()
+                {
+                    trace!("The transaction was spent, must be stakeguard");
+                    debug!("perpetrator: {:?}", block.postxddest);
+
+                    // set the stake to "caught"
+                }
                 trace!(
                     "{}:{} not matured (blocks to maturity: {})",
                     stake.blockhash,

@@ -119,6 +119,7 @@ impl Stake {
 pub enum StakeResult {
     Mature,
     Stale,
+    Stolen,
     Pending,
 }
 
@@ -129,6 +130,7 @@ impl FromStr for StakeResult {
         match s {
             "mature" => Ok(Self::Mature),
             "stale" => Ok(Self::Stale),
+            "stolen" => Ok(Self::Stolen),
             "" => Ok(Self::Pending),
             _ => panic!(),
         }
@@ -140,6 +142,7 @@ impl ToString for StakeResult {
         match self {
             Self::Mature => "mature".to_string(),
             Self::Stale => "stale".to_string(),
+            Self::Stolen => "stolen".to_string(),
             Self::Pending => "".to_string(),
         }
     }

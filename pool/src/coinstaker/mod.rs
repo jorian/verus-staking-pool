@@ -359,6 +359,26 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         )
                         .await?;
                 }
+                CoinStakerMessage::StolenBlock(mut stake) => {
+                    database::move_work_to_current_round(
+                        &cs.pool,
+                        &cs.chain.currencyid.to_string(),
+                        stake.blockheight,
+                    )
+                    .await?;
+
+                    stake.set_result("stolen")?;
+
+                    database::set_stake_result(&cs.pool, &stake).await?;
+
+                    cs.get_mpsc_sender()
+                        .send(CoinStakerMessage::SetBlacklist(stake.mined_by, true))
+                        .await?;
+
+                    // blacklist the user
+                    // move work back to round 0
+                    // nats a message
+                }
                 CoinStakerMessage::MaturedBlock(mut stake) => {
                     stake.set_result("mature")?;
 
@@ -772,6 +792,46 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                     os_tx.send(fees).unwrap();
                 }
+                CoinStakerMessage::SetBlacklist(address, blacklist) => {
+                    trace!("Setting blacklist status for {address} to {blacklist}");
+                    // get subscriber
+                    if let Some(subscriber) = database::get_subscriber(
+                        &cs.pool,
+                        &cs.chain.currencyid.to_string(),
+                        &address.to_string(),
+                    )
+                    .await?
+                    {
+                        if blacklist {
+                            database::update_subscriber_status(
+                                &cs.pool,
+                                &cs.chain.currencyid.to_string(),
+                                &address.to_string(),
+                                "banned",
+                            )
+                            .await?;
+                        } else {
+                            // unban this subscriber
+                            // run subscriber through eligibility test:
+                            let client = &cs.chain.verusd_client()?;
+                            let identity = client.get_identity(&address.to_string())?;
+                            let new_status =
+                                if cs.identity_is_eligible(&identity.identity, &subscriber) {
+                                    "subscribed"
+                                } else {
+                                    "unsubscribed"
+                                };
+
+                            database::update_subscriber_status(
+                                &cs.pool,
+                                &cs.chain.currencyid.to_string(),
+                                &address.to_string(),
+                                new_status,
+                            )
+                            .await?;
+                        }
+                    }
+                }
             }
         }
 
@@ -788,6 +848,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 pub enum CoinStakerMessage {
     BlockNotify(BlockHash),
     StaleBlock(Stake),
+    StolenBlock(Stake),
     MaturedBlock(Stake),
     StakingSupply(oneshot::Sender<(f64, f64, f64)>, Vec<(String, String)>),
     SetFeeDiscount(oneshot::Sender<f32>, f32),
@@ -803,6 +864,7 @@ pub enum CoinStakerMessage {
     NewSubscriber(oneshot::Sender<Result<Subscriber, CoinStakerError>>, String),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<String>),
     GetPoolFees(oneshot::Sender<Amount>),
+    SetBlacklist(Address, bool),
 }
 
 async fn tmq_block_listen(

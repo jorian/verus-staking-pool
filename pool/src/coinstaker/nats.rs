@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use color_eyre::Report;
 use futures::StreamExt;
 use poollib::{Payload, PayoutMember, Stake, Subscriber};
@@ -263,6 +265,20 @@ pub async fn nats_server(
                             let resp = os_rx.await?;
                             debug!("fees returned: {resp:?}");
                             client.publish(reply, serde_json::to_string(&resp.as_vrsc())?.into()).await?;
+                        }
+                        "setblacklist" => {
+                            let identity = Address::from_str(payload.data["identity"].as_str().unwrap())?;
+                            let to_blacklist = payload.data["blacklist"].as_bool().unwrap();
+                            trace!("set blacklist status for {identity} to {to_blacklist} on {currencyid}");
+
+                            // let (os_tx, os_rx) = oneshot::channel::<Amount>();
+                            cs_tx
+                                .send(CoinStakerMessage::SetBlacklist(identity, to_blacklist))
+                                .await?;
+
+                            // let resp = os_rx.await?;
+                            // debug!("");
+                            client.publish(reply, serde_json::to_string(&json!({"result":"success"}))?.into()).await?;
                         }
                         _ => {}
                     }

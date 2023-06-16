@@ -1,4 +1,4 @@
-use std::{fmt::Display, str::FromStr};
+use std::fmt::Display;
 
 use color_eyre::Report;
 use vrsc_rpc::{json::vrsc::Address, Auth, Client};
