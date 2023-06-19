@@ -55,6 +55,13 @@ pub fn get_coin_configurations() -> Result<Vec<CoinConfig>, Report> {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct VerusVaultConditions {
+    pub min_lock: u32,
+    pub strict_recovery_id: bool,
+    pub max_primary_addresses: u8,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct CoinConfig {
     pub currencyid: Address,
     pub name: String,
@@ -77,6 +84,7 @@ pub struct CoinConfig {
     pub rpc_password: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub rpc_port: u16,
+    pub verus_vault_conditions: VerusVaultConditions,
 }
 
 impl From<&CoinConfig> for Chain {

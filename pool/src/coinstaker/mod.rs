@@ -88,6 +88,7 @@ impl CoinStaker {
         identity: &IdentityPrimary,
         subscriber: &Subscriber,
     ) -> bool {
+        let conditions = &self.config.verus_vault_conditions;
         // testnet currencies do not have strict checking to make testing easier.
         if self.chain.testnet {
             if identity.minimumsignatures == 1
@@ -97,16 +98,22 @@ impl CoinStaker {
                 return true;
             }
         } else {
-            if identity.minimumsignatures == 1
-                && identity.primaryaddresses.len() > 1
-                && identity.primaryaddresses.contains(&subscriber.pool_address)
-                && identity.revocationauthority.ne(&identity.identityaddress)
-                && identity.recoveryauthority.ne(&identity.identityaddress)
-                && identity.flags == 2
-                && (identity.timelock >= 720 || identity.timelock <= 10080)
-            {
-                return true;
+            match identity.flags {
+                1 => {}
+                2 => {}
+                _ => return false,
             }
+
+            // if identity.minimumsignatures == 1
+            //     && identity.primaryaddresses.len() > 1
+            //     && identity.primaryaddresses.contains(&subscriber.pool_address)
+            //     && identity.revocationauthority.ne(&identity.identityaddress)
+            //     && identity.recoveryauthority.ne(&identity.identityaddress)
+            //     && identity.flags == 2
+            //     && (identity.timelock >= 720 || identity.timelock <= 10080)
+            // {
+            //     return true;
+            // }
         }
 
         false
