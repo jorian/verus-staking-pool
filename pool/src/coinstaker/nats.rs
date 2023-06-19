@@ -279,7 +279,7 @@ pub async fn nats_server(
                             let resp = os_rx.await?;
                             client.publish(reply, serde_json::to_string(&resp)?.into()).await?;
                         }
-                        _ => {}
+                        _ => continue
                     }
                 }
             }
