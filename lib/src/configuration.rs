@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use color_eyre::Report;
 use serde::Deserialize;
 use serde_aux::prelude::deserialize_number_from_string;
+use serde_derive::Serialize;
 use tracing::{debug, warn};
 use vrsc_rpc::json::vrsc::Address;
 
@@ -54,7 +55,7 @@ pub fn get_coin_configurations() -> Result<Vec<CoinConfig>, Report> {
     Ok(coin_settings)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VerusVaultConditions {
     pub min_lock: u32,
     pub strict_recovery_id: bool,

@@ -8,8 +8,9 @@ use chrono::{DateTime, Duration, Utc};
 use color_eyre::Report;
 use futures::StreamExt;
 use poollib::{
-    chain::Chain, configuration::CoinConfig, database, Payload, PayoutMember, PgPool, Stake,
-    Subscriber,
+    chain::Chain,
+    configuration::{CoinConfig, VerusVaultConditions},
+    database, Payload, PayoutMember, PgPool, Stake, Subscriber,
 };
 use rust_decimal::{
     prelude::{FromPrimitive, ToPrimitive},
@@ -840,6 +841,13 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         }
                     }
                 }
+                CoinStakerMessage::GetVaultConditions(os_tx) => {
+                    trace!("getting vaultconditions");
+
+                    os_tx
+                        .send(cs.config.verus_vault_conditions.clone())
+                        .unwrap();
+                }
             }
         }
 
@@ -873,6 +881,7 @@ pub enum CoinStakerMessage {
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<String>),
     GetPoolFees(oneshot::Sender<Amount>),
     SetBlacklist(Option<oneshot::Sender<Subscriber>>, Address, bool),
+    GetVaultConditions(oneshot::Sender<VerusVaultConditions>),
 }
 
 async fn tmq_block_listen(

@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use color_eyre::Report;
 use futures::StreamExt;
-use poollib::{Payload, PayoutMember, Stake, Subscriber};
+use poollib::{configuration::VerusVaultConditions, Payload, PayoutMember, Stake, Subscriber};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, trace};
@@ -274,6 +274,17 @@ pub async fn nats_server(
                             let (os_tx, os_rx) = oneshot::channel::<Subscriber>();
                             cs_tx
                                 .send(CoinStakerMessage::SetBlacklist(Some(os_tx), identity, to_blacklist))
+                                .await?;
+
+                            let resp = os_rx.await?;
+                            client.publish(reply, serde_json::to_string(&resp)?.into()).await?;
+                        }
+                        "getvaultconditions" => {
+                            trace!("get vaultconditions for {currencyid}");
+
+                            let (os_tx, os_rx) = oneshot::channel::<VerusVaultConditions>();
+                            cs_tx
+                                .send(CoinStakerMessage::GetVaultConditions(os_tx))
                                 .await?;
 
                             let resp = os_rx.await?;
