@@ -445,15 +445,19 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                     continue;
                 }
-                CoinStakerMessage::StakingSupply(os_tx, tuples) => {
+                CoinStakerMessage::StakingSupply(os_tx, identities) => {
                     let client = cs.chain.verusd_client()?;
                     let wallet_info = client.get_wallet_info()?;
                     let pool_supply = wallet_info.eligible_staking_balance.as_vrsc();
                     let mining_info = client.get_mining_info()?;
                     let network_supply = mining_info.stakingsupply;
-                    let my_supply = if tuples.len() > 0 {
-                        let mut subscriptions =
-                            database::get_subscriptions(&cs.pool, &tuples).await?;
+                    let my_supply = if identities.len() > 0 {
+                        let mut subscriptions = database::get_subscriptions(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                            &identities,
+                        )
+                        .await?;
 
                         trace!("subscriptions found: {subscriptions:#?}");
 
@@ -866,7 +870,7 @@ pub enum CoinStakerMessage {
     StaleBlock(Stake),
     StolenBlock(Stake),
     MaturedBlock(Stake),
-    StakingSupply(oneshot::Sender<(f64, f64, f64)>, Vec<(String, String)>),
+    StakingSupply(oneshot::Sender<(f64, f64, f64)>, Vec<String>),
     SetFeeDiscount(oneshot::Sender<f32>, f32),
     ProcessPayments(),
     GetIdentity(oneshot::Sender<Option<Identity>>, String),

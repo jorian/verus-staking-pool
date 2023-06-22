@@ -143,10 +143,10 @@ pub async fn nats_server(
                         "stakingsupply" => {
                             let (os_tx, os_rx) = oneshot::channel::<(f64, f64, f64)>();
                             let mut data = payload.data;
-                            let tuples: Vec<(String, String)> =
-                                serde_json::from_value(data["tuples"].take()).unwrap();
+                            let identities: Vec<String> =
+                                serde_json::from_value(data["identities"].take()).unwrap();
                             cs_tx
-                                .send(CoinStakerMessage::StakingSupply(os_tx, tuples))
+                                .send(CoinStakerMessage::StakingSupply(os_tx, identities))
                                 .await?;
 
                             let (network_supply, pool_supply, my_supply) = os_rx.await?;
