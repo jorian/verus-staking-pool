@@ -40,6 +40,8 @@ pub async fn nats_server(
 
                     match &*payload.command {
                         // arguments: none
+                        // response:
+                        // - alive: bool
                         "heartbeat" => {
                             let (os_tx, os_rx) = oneshot::channel::<()>();
                             cs_tx.send(CoinStakerMessage::Heartbeat(os_tx)).await?;
@@ -56,6 +58,8 @@ pub async fn nats_server(
                         }
                         // does `setgenerate true 0` when true, `setgenerate false` when false
                         // arguments: `staking_enabled`
+                        // response:
+                        // - result: string
                         "setstaking" => {
                             let generate = payload.data["staking_enabled"].as_bool().unwrap();
                             let (os_tx, os_rx) = oneshot::channel::<()>();
@@ -83,10 +87,15 @@ pub async fn nats_server(
                         // creates a new pending subscriber if it doesn't exist, and returns the subscriber object.
                         // fails if the identityaddress already is an active subscriber on this currencyid.
                         // arguments: identitystr
+                        // response:
+                        // - result: {subscriber object}
+                        // error:
+                        // - error: string
                         "newpendingsubscriber" => {
                             let (os_tx, os_rx) =
                                 oneshot::channel::<Result<Subscriber, CoinStakerError>>();
-                            let identitystr: &str = payload.data["identitystr"].as_str().unwrap(); // TODO return error if missing
+                            let identitystr: &str = payload.data["identitystr"].as_str().unwrap();
+                            // TODO return error if missing
 
                             cs_tx
                                 .send(CoinStakerMessage::NewSubscriber(
@@ -98,29 +107,44 @@ pub async fn nats_server(
                             match os_rx.await? {
                                 Ok(sub) => {
                                     let serde_str = serde_json::to_string(&sub)?;
-                                    client.publish(reply, serde_str.into()).await?
-                                }
-                                Err(e) => {
-                                    let message = match e {
-                                        CoinStakerError::IdentityNotValid => format!("Identity parameter must be valid friendly name or identity address: {}", identitystr),
-                                        CoinStakerError::SubscriberAlreadyExists => format!("This identity is already a subscriber: {} on {}", identitystr, currencyid.to_string() )
-                                    };
                                     client
                                         .publish(
                                             reply,
-                                            json!({ "error": message }).to_string().into(),
+                                            json!({ "result": serde_str }).to_string().into(),
+                                        )
+                                        .await?
+                                }
+                                Err(e) => {
+                                    // let message = match e {
+                                    //     CoinStakerError::IdentityNotValid => format!(
+                                    //         "Identity parameter must be valid friendly name or identity address: {}",
+                                    //          identitystr
+                                    //     ),
+                                    //     CoinStakerError::SubscriberAlreadyExists => format!(
+                                    //         "This identity is already a subscriber: {} on {}",
+                                    //         identitystr, currencyid.to_string()
+                                    //     )
+                                    // };
+
+                                    client
+                                        .publish(
+                                            reply,
+                                            json!({ "error": e.to_string() }).to_string().into(),
                                         )
                                         .await?;
                                 }
                             }
                         }
                         // arguments: identityaddresses, an array of strings
+                        // response
+                        // - result: [{subscriber object}]
                         "getsubscriptions" => {
                             let (os_tx, os_rx) = oneshot::channel::<Vec<Subscriber>>();
                             let mut data = payload.data;
                             debug!("data: {data:?}");
                             let identityaddresses: Vec<String> =
                                 serde_json::from_value(data["identityaddresses"].take())?;
+
                             debug!("{identityaddresses:?}");
 
                             cs_tx
@@ -153,10 +177,12 @@ pub async fn nats_server(
                             client
                                 .publish(
                                     reply,
-                                    json!({
-                                        "network_supply": network_supply, 
-                                        "pool_supply": pool_supply, 
-                                        "my_supply": my_supply})
+                                    json!({ "result": {
+                                            "network_supply": network_supply,
+                                            "pool_supply": pool_supply,
+                                            "my_supply": my_supply
+                                        }
+                                    })
                                     .to_string()
                                     .into(),
                                 )
@@ -188,7 +214,9 @@ pub async fn nats_server(
 
                             if let Some(identity) = os_rx.await? {
                                 let ser = serde_json::to_string(&identity)?;
-                                client.publish(reply, ser.into()).await?
+                                client
+                                    .publish(reply, json!({ "result": ser }).to_string().into())
+                                    .await?
                             } else {
                                 client
                                     .publish(
@@ -199,6 +227,11 @@ pub async fn nats_server(
                             }
                         }
                         // arguments: identity
+                        // result:
+                        // - "identity_name"
+                        // - "identity_address"
+                        // - "currency_id"
+                        // - "currency_name"
                         "checksubscriber" => {
                             debug!("{payload:?}");
                             let (os_tx, os_rx) = oneshot::channel::<serde_json::Value>();
@@ -224,7 +257,7 @@ pub async fn nats_server(
                             let resp_json = serde_json::to_string(&resp)?;
                             client.publish(reply, resp_json.into()).await?;
                         }
-                        // arguments: 
+                        // arguments:
                         // - threshold
                         // - identity
                         "setminpayout" => {
@@ -241,7 +274,7 @@ pub async fn nats_server(
                             let resp = os_rx.await?;
                             client.publish(reply, resp.to_string().into()).await?;
                         }
-                        // arguments: none
+                        // // arguments: none
                         "pendingstakes" => {
                             debug!("{payload:?}");
 
@@ -250,10 +283,11 @@ pub async fn nats_server(
                             cs_tx.send(CoinStakerMessage::PendingStakes(os_tx)).await?;
 
                             let resp = os_rx.await?;
+
                             let resp_json = serde_json::to_string(&resp)?;
                             client.publish(reply, resp_json.into()).await?;
                         }
-                        // arguments: identities, array of identities
+                        // // arguments: identities, array of identities
                         "payouts" => {
                             debug!("{payload:?}");
                             let (os_tx, os_rx) = oneshot::channel::<Vec<PayoutMember>>();
@@ -265,36 +299,54 @@ pub async fn nats_server(
                                 .await?;
 
                             let resp = os_rx.await?;
-                            client.publish(reply, serde_json::to_string(&resp)?.into()).await?;
+                            client
+                                .publish(reply, serde_json::to_string(&resp)?.into())
+                                .await?;
                         }
-                        // arguments: none
+                        // // arguments: none
                         "fees" => {
                             trace!("get pool fees for {}", currencyid);
                             let (os_tx, os_rx) = oneshot::channel::<Amount>();
-                            cs_tx
-                                .send(CoinStakerMessage::GetPoolFees(os_tx))
-                                .await?;
+                            cs_tx.send(CoinStakerMessage::GetPoolFees(os_tx)).await?;
 
                             let resp = os_rx.await?;
                             debug!("fees returned: {resp:?}");
-                            client.publish(reply, serde_json::to_string(&resp.as_vrsc())?.into()).await?;
+                            client
+                                .publish(reply, serde_json::to_string(&resp.as_vrsc())?.into())
+                                .await?;
                         }
-                        // arguments: 
+                        // arguments:
                         // - identity: identity string to blacklist
                         // - blacklist: bool, true means to blacklist, false to undo blacklist
                         "setblacklist" => {
-                            let identity = Address::from_str(payload.data["identity"].as_str().unwrap())?;
+                            let identity =
+                                Address::from_str(payload.data["identity"].as_str().unwrap())?;
                             let to_blacklist = payload.data["blacklist"].as_bool().unwrap();
-                            trace!("set blacklist status for {identity} to {to_blacklist} on {currencyid}");
+
+                            trace!(
+                                "set blacklist status for {} to {} on {}",
+                                identity,
+                                to_blacklist,
+                                currencyid
+                            );
 
                             let (os_tx, os_rx) = oneshot::channel::<Subscriber>();
+
                             cs_tx
-                                .send(CoinStakerMessage::SetBlacklist(Some(os_tx), identity, to_blacklist))
+                                .send(CoinStakerMessage::SetBlacklist(
+                                    Some(os_tx),
+                                    identity,
+                                    to_blacklist,
+                                ))
                                 .await?;
 
                             let resp = os_rx.await?;
-                            client.publish(reply, serde_json::to_string(&resp)?.into()).await?;
+
+                            client
+                                .publish(reply, serde_json::to_string(&resp)?.into())
+                                .await?;
                         }
+
                         // arguments: none
                         "getvaultconditions" => {
                             trace!("get vaultconditions for {currencyid}");
@@ -305,9 +357,11 @@ pub async fn nats_server(
                                 .await?;
 
                             let resp = os_rx.await?;
-                            client.publish(reply, serde_json::to_string(&resp)?.into()).await?;
+                            client
+                                .publish(reply, serde_json::to_string(&resp)?.into())
+                                .await?;
                         }
-                        _ => continue
+                        _ => continue,
                     }
                 }
             }
