@@ -96,26 +96,21 @@ impl CoinStaker {
             && identity.primaryaddresses.len() > 1
             && identity.primaryaddresses.contains(&subscriber.pool_address)
         {
-            if self.chain.testnet {
-                // testnet currencies do not have strict checking to make testing easier.
-                return true;
-            } else {
-                match identity.flags {
-                    // fixed time lock; unlock at x seconds (epoch)
-                    1 => {
-                        // TODO v2, ineligible until then
-                        return false;
-                    }
-                    // delay lock; unlock after x seconds
-                    2 => {
-                        return identity.timelock >= conditions.min_lock as u64
-                            && identity.primaryaddresses.len()
-                                <= conditions.max_primary_addresses.try_into().unwrap_or(0)
-                            && identity.recoveryauthority != identity.identityaddress
-                            && identity.revocationauthority != identity.identityaddress
-                    }
-                    _ => return false,
+            match identity.flags {
+                // fixed time lock; unlock at x seconds (epoch)
+                1 => {
+                    // TODO v2, ineligible until then
+                    return false;
                 }
+                // delay lock; unlock after x seconds
+                2 => {
+                    return identity.timelock >= conditions.min_lock as u64
+                        && identity.primaryaddresses.len()
+                            <= conditions.max_primary_addresses.try_into().unwrap_or(0)
+                        && identity.recoveryauthority != identity.identityaddress
+                        && identity.revocationauthority != identity.identityaddress
+                }
+                _ => return false,
             }
         }
 

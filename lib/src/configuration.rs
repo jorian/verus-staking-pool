@@ -56,10 +56,21 @@ pub fn get_coin_configurations() -> Result<Vec<CoinConfig>, Report> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct VerusVaultConditions {
     pub min_lock: u32,
     pub strict_recovery_id: bool,
     pub max_primary_addresses: u8,
+}
+
+impl Default for VerusVaultConditions {
+    fn default() -> Self {
+        Self {
+            min_lock: 0,
+            strict_recovery_id: false,
+            max_primary_addresses: 64,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +96,7 @@ pub struct CoinConfig {
     pub rpc_password: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub rpc_port: u16,
+    #[serde(default)]
     pub verus_vault_conditions: VerusVaultConditions,
 }
 
