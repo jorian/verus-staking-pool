@@ -758,7 +758,10 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                     trace!("the user has an active subscription");
 
                                     os_tx
-                                        .send(Err(CoinStakerError::SubscriberAlreadyExists.into()))
+                                        .send(Err(CoinStakerError::SubscriberAlreadyExists(
+                                            existing_subscriber.identity_name.clone(),
+                                        )
+                                        .into()))
                                         .unwrap();
                                 }
                             } else {
@@ -785,7 +788,10 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         }
                         Err(_e) => {
                             os_tx
-                                .send(Err(CoinStakerError::IdentityNotValid.into()))
+                                .send(Err(CoinStakerError::IdentityNotValid(
+                                    identitystr.to_string(),
+                                )
+                                .into()))
                                 .unwrap();
                         }
                     }

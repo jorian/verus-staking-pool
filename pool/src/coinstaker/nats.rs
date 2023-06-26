@@ -115,21 +115,10 @@ pub async fn nats_server(
                                         .await?
                                 }
                                 Err(e) => {
-                                    // let message = match e {
-                                    //     CoinStakerError::IdentityNotValid => format!(
-                                    //         "Identity parameter must be valid friendly name or identity address: {}",
-                                    //          identitystr
-                                    //     ),
-                                    //     CoinStakerError::SubscriberAlreadyExists => format!(
-                                    //         "This identity is already a subscriber: {} on {}",
-                                    //         identitystr, currencyid.to_string()
-                                    //     )
-                                    // };
-
                                     client
                                         .publish(
                                             reply,
-                                            json!({ "error": e.to_string() }).to_string().into(),
+                                            json!({ "error": format!("{e}") }).to_string().into(),
                                         )
                                         .await?;
                                 }

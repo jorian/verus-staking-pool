@@ -2,8 +2,8 @@ use std::fmt::Formatter;
 
 #[derive(Debug)]
 pub enum CoinStakerError {
-    SubscriberAlreadyExists,
-    IdentityNotValid,
+    SubscriberAlreadyExists(String),
+    IdentityNotValid(String),
 }
 
 impl std::error::Error for CoinStakerError {
@@ -18,9 +18,9 @@ impl std::error::Error for CoinStakerError {
 
 impl std::fmt::Display for CoinStakerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Self::SubscriberAlreadyExists => write!(f, "Subscriber already exists"),
-            Self::IdentityNotValid => write!(f, "Identity is not valid on this chain"),
+        match self {
+            Self::SubscriberAlreadyExists(sub) => write!(f, "Subscriber already exists: {sub}"),
+            Self::IdentityNotValid(id) => write!(f, "Identity is not valid on this chain: {id}"),
         }
     }
 }
