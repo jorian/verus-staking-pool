@@ -437,12 +437,15 @@ pub async fn process_payments(
                 }),
             };
 
-            nats_client
+            if let Err(e) = nats_client
                 .publish(
                     "ipc.coinstaker".into(),
                     serde_json::to_vec(&json!(payload))?.into(),
                 )
-                .await?;
+                .await
+            {
+                error!("something went wrong while sending payment nats message:\n{e:?}");
+            }
         }
     }
 
