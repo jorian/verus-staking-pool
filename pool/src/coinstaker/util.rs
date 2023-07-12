@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::time::Duration as TimeDuration;
 
 use color_eyre::Report;
 use poollib::{chain::Chain, database, Payload, PgPool, Stake, StakeResult, Subscriber};
@@ -377,79 +376,75 @@ pub async fn add_work(
     Ok(())
 }
 
-#[instrument(skip(pool, client, pool_identity_address, interval, nats_client))]
+#[instrument(skip(pool, client, pool_identity_address, nats_client))]
 pub async fn process_payments(
-    pool: PgPool,
-    client: Client,
-    nats_client: async_nats::Client,
-    currencyid: Address,
-    pool_identity_address: Address,
-    interval: TimeDuration,
+    pool: &PgPool,
+    client: &Client,
+    nats_client: &async_nats::Client,
+    currencyid: &Address,
+    pool_identity_address: &Address,
 ) -> Result<(), Report> {
-    let mut interval = tokio::time::interval(interval);
+    info!("process pending payments");
 
-    loop {
-        interval.tick().await;
-        info!("process pending payments");
+    if let Some(eligible) =
+        PayoutManager::get_eligible_for_payout(&pool, &currencyid.to_string()).await?
+    {
+        let outputs = PayoutManager::prepare_payment(&eligible)?;
+        debug!("outputs: {outputs:#?}");
 
-        if let Some(eligible) =
-            PayoutManager::get_eligible_for_payout(&pool, &currencyid.to_string()).await?
+        let total_amount = outputs
+            .iter()
+            .fold(Amount::ZERO, |acc, sum| acc + sum.amount);
+
+        if let Some(txid) =
+            PayoutManager::send_payment(outputs, &pool_identity_address, &client).await?
         {
-            let outputs = PayoutManager::prepare_payment(&eligible)?;
-            debug!("outputs: {outputs:#?}");
-
-            let total_amount = outputs
-                .iter()
-                .fold(Amount::ZERO, |acc, sum| acc + sum.amount);
-
-            if let Some(txid) =
-                PayoutManager::send_payment(outputs, &pool_identity_address, &client).await?
+            if let Err(e) = database::update_payment_members(
+                &pool,
+                &currencyid.to_string(),
+                eligible.values().flatten(),
+                &txid.to_string(),
+            )
+            .await
             {
-                if let Err(e) = database::update_payment_members(
-                    &pool,
-                    &currencyid.to_string(),
-                    eligible.values().flatten(),
-                    &txid.to_string(),
-                )
-                .await
-                {
-                    error!(
-                        "A payment was made but it could not be processed in the database\n
+                error!(
+                    "A payment was made but it could not be processed in the database\n
                         chain: {}\n
                         txid: {},\n
                         error: {:?}\n
                         eligible payment members: {:#?}",
-                        &currencyid.to_string(),
-                        txid,
-                        e,
-                        &eligible
-                    );
+                    &currencyid.to_string(),
+                    txid,
+                    e,
+                    &eligible
+                );
 
-                    return Err(PayoutManagerError::DbWriteFail.into());
-                }
-
-                let chain_name = client
-                    .get_currency(&currencyid.to_string())?
-                    .fullyqualifiedname;
-
-                // send message
-                let payload = Payload {
-                    command: "payment".to_string(),
-                    data: json!({
-                        "chain_name": chain_name,
-                        "txid": txid.to_string(),
-                        "amount": total_amount.as_vrsc(),
-                        "n_subs": eligible.len()
-                    }),
-                };
-
-                nats_client
-                    .publish(
-                        "ipc.coinstaker".into(),
-                        serde_json::to_vec(&json!(payload))?.into(),
-                    )
-                    .await?;
+                return Err(PayoutManagerError::DbWriteFail.into());
             }
+
+            let chain_name = client
+                .get_currency(&currencyid.to_string())?
+                .fullyqualifiedname;
+
+            // send message
+            let payload = Payload {
+                command: "payment".to_string(),
+                data: json!({
+                    "chain_name": chain_name,
+                    "txid": txid.to_string(),
+                    "amount": total_amount.as_vrsc(),
+                    "n_subs": eligible.len()
+                }),
+            };
+
+            nats_client
+                .publish(
+                    "ipc.coinstaker".into(),
+                    serde_json::to_vec(&json!(payload))?.into(),
+                )
+                .await?;
         }
     }
+
+    Ok(())
 }

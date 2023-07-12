@@ -2,7 +2,7 @@ mod error;
 mod nats;
 mod util;
 
-use std::{ops::SubAssign, str::FromStr, time::Duration as TimeDuration};
+use std::{ops::SubAssign, str::FromStr};
 
 use chrono::{DateTime, Duration, Utc};
 use color_eyre::Report;
@@ -209,19 +209,24 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             let currencyid = cs.chain.currencyid.clone();
             let pool_identity_address = cs.pool_identity_address.clone();
             let nats_client = cs.nats_client.clone();
-            let payout_interval = cs.config.payout_interval;
+            let payout_interval = std::time::Duration::from_secs(cs.config.payout_interval);
             async move {
-                if let Err(e) = util::process_payments(
-                    pool,
-                    client,
-                    nats_client,
-                    currencyid,
-                    pool_identity_address,
-                    TimeDuration::from_secs(payout_interval),
-                )
-                .await
-                {
-                    error!("an error occurred in PayoutManager, stopping payments\n{e:?}");
+                let mut interval = tokio::time::interval(payout_interval);
+
+                loop {
+                    interval.tick().await;
+
+                    if let Err(e) = util::process_payments(
+                        &pool,
+                        &client,
+                        &nats_client,
+                        &currencyid,
+                        &pool_identity_address,
+                    )
+                    .await
+                    {
+                        error!("an error occurred in PayoutManager, stopping payments\n{e:?}");
+                    }
                 }
             }
         });

@@ -78,7 +78,7 @@ impl Payout {
             debug!("shared_amount_minus_fee: {shared_amount_minus_fee:?}");
 
             let mut shared_amount_minus_fee = shared_amount_minus_fee
-                .round_dp_with_strategy(8, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+                .round_dp_with_strategy(8, rust_decimal::RoundingStrategy::ToZero);
 
             shared_amount_minus_fee.rescale(8);
             fee_amount.rescale(8);
