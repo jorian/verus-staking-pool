@@ -745,14 +745,29 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                                     trace!("use existing address if user is still pending or is unsubscribed or has no status");
                                     trace!("update db, set subscriber status to pending");
 
-                                    database::update_subscriber_status(
-                                        &cs.pool,
-                                        &cs.chain.currencyid.to_string(),
-                                        &identity.identity.identityaddress.to_string(),
-                                        "pending",
-                                    )
-                                    .await?;
+                                    // TODO a unsubscribed user could've unlocked and locked it's ID. At this point, the
+                                    // check for eligility should already pass and the user can join the pool immediately
 
+                                    if cs.identity_is_eligible(
+                                        &identity.identity,
+                                        &existing_subscriber,
+                                    ) {
+                                        database::update_subscriber_status(
+                                            &cs.pool,
+                                            &cs.chain.currencyid.to_string(),
+                                            &identity.identity.identityaddress.to_string(),
+                                            "subscribed",
+                                        )
+                                        .await?;
+                                    } else {
+                                        database::update_subscriber_status(
+                                            &cs.pool,
+                                            &cs.chain.currencyid.to_string(),
+                                            &identity.identity.identityaddress.to_string(),
+                                            "pending",
+                                        )
+                                        .await?;
+                                    }
                                     os_tx.send(Ok(existing_subscriber)).unwrap();
                                 } else {
                                     trace!("the user has an active subscription");
