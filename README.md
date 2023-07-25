@@ -6,7 +6,7 @@ This is the back-end part of a staking pool for the Verus Platform. It:
 - tracks shares (how much each staker put in)
 - handles payments to subscribers
 
-![Untitled Diagram.drawio.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/f405c1f4-c763-44c6-a690-8755e9092bd3/Untitled_Diagram.drawio.png)
+![overview.png](overview.png)
 
 Coinstaker (chainstaker) is at the center of the pool. It sits close to the Verus daemon to request updates regarding VerusIDs and block notifications. 
 
@@ -39,7 +39,7 @@ Additionally, every individual pool can add certain conditions to which every ne
 - whether a separate revoke and recover identity is required
 - how many primary addresses a subscriber’s VerusID may hold
 - a limit on the number of UTXOs a VerusID has
-- (possible more in the future)
+- (possibly more in the future)
 
 ## Stake processor
 
