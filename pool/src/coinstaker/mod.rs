@@ -191,14 +191,14 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             }
         }
 
-        let maturing_stakes =
+        let mut maturing_stakes =
             database::get_pending_stakes(&cs.pool, &cs.chain.currencyid.to_string()).await?;
         debug!("pending txns {:#?}", maturing_stakes);
 
         let chain_c = cs.chain.clone();
         let c_tx = cs.get_mpsc_sender();
 
-        if let Err(e) = util::check_for_maturity(chain_c, &maturing_stakes, c_tx).await {
+        if let Err(e) = util::check_for_maturity(chain_c, &mut maturing_stakes, c_tx).await {
             error!("wait for maturity: {:?}", e);
         }
 
@@ -271,7 +271,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                             }
                         }
 
-                        let pending_stakes = database::get_pending_stakes(
+                        let mut pending_stakes = database::get_pending_stakes(
                             &cs.pool,
                             &cs.chain.currencyid.to_string(),
                         )
@@ -279,7 +279,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                         util::check_for_maturity(
                             cs.chain.clone(),
-                            &pending_stakes,
+                            &mut pending_stakes,
                             cs.get_mpsc_sender(),
                         )
                         .await?;
@@ -873,6 +873,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         .send(cs.config.verus_vault_conditions.clone())
                         .unwrap();
                 }
+                CoinStakerMessage::UpdateStakeStatus(stake) => {}
             }
         }
 
@@ -907,6 +908,7 @@ pub enum CoinStakerMessage {
     GetPoolFees(oneshot::Sender<Amount>),
     SetBlacklist(Option<oneshot::Sender<Subscriber>>, Address, bool),
     GetVaultConditions(oneshot::Sender<VerusVaultConditions>),
+    UpdateStakeStatus(Stake),
 }
 
 async fn tmq_block_listen(

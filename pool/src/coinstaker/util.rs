@@ -21,7 +21,7 @@ use super::{CoinStaker, CoinStakerMessage};
 #[instrument(level = "trace", skip(chain, c_tx, pending_stakes), fields(chain = chain.name))]
 pub async fn check_for_maturity(
     chain: Chain, // only needed for daemon client
-    pending_stakes: &[Stake],
+    pending_stakes: &mut [Stake],
     c_tx: mpsc::Sender<CoinStakerMessage>,
 ) -> Result<(), Report> {
     trace!(
@@ -57,7 +57,7 @@ pub async fn check_for_maturity(
                 // Unlocked IDs are ignored in the pool.
                 if block
                     .tx
-                    .first()
+                    .first() // we always need the coinbase, it is always first
                     .unwrap() // unwrap because every block has a coinbase
                     .vout
                     .first()
@@ -68,7 +68,10 @@ pub async fn check_for_maturity(
                     trace!("The transaction was spent, must be stakeguard");
                     debug!("perpetrator: {:?}", block.postxddest);
 
-                    // set the stake result to "stolen"
+                    stake.set_result("stolen")?;
+                    c_tx.send(CoinStakerMessage::UpdateStakeStatus(stake.clone()))
+                        .await
+                        .expect("message sent to coinstaker");
                 }
                 trace!(
                     "{}:{} not matured (blocks to maturity: {})",
