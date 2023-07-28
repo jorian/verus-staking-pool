@@ -94,8 +94,8 @@ fn logging_setup() {
         .with(fmt::Layer::default())
         .with(
             fmt::Layer::new()
-                .json()
-                .with_ansi(false)
+                // .json()
+                // .with_ansi(false)
                 .with_writer(file_appender.with_max_level(Level::TRACE)),
         )
         .try_init()

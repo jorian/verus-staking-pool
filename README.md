@@ -51,3 +51,4 @@ When the block matures, a payout is calculated based on the work that was put in
 
 Once a subscriber’s (configurable) minimum payout threshold is reached, a payout is done. To prevent many smaller UTXOs, a payout manager keeps track of pending balances for every subscriber and pays out at a configurable period.
 
+Pool fees are accumulated in the pool address and are not explicitly sent to an address. The database has enough information to retrieve the total pool fees.

@@ -395,6 +395,7 @@ pub async fn process_payments(
         let outputs = PayoutManager::prepare_payment(&eligible)?;
         debug!("outputs: {outputs:#?}");
 
+        // information to broadcast
         let total_amount = outputs
             .iter()
             .fold(Amount::ZERO, |acc, sum| acc + sum.amount);

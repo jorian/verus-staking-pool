@@ -163,6 +163,7 @@ impl PayoutManager {
         pool_address: &Address,
         client: &Client,
     ) -> Result<Option<Txid>, Report> {
+        debug!("outputs to send: {:#?}", &outputs);
         let opid = client.send_currency(&pool_address.to_string(), outputs, None, None)?;
 
         if let Some(txid) = wait_for_sendcurrency_finish(&client, &opid).await? {
