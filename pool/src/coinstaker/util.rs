@@ -429,7 +429,6 @@ pub async fn process_payments(
                 .get_currency(&currencyid.to_string())?
                 .fullyqualifiedname;
 
-            // send message
             let payload = Payload {
                 command: "payment".to_string(),
                 data: json!({

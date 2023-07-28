@@ -86,7 +86,7 @@ fn logging_setup() {
         .or_else(|_| EnvFilter::try_new("info"))
         .unwrap();
 
-    let file_appender = tracing_appender::rolling::hourly("./logs", "error");
+    let file_appender = tracing_appender::rolling::hourly("./logs", "trace");
     // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::registry()
@@ -96,7 +96,7 @@ fn logging_setup() {
             fmt::Layer::new()
                 .json()
                 .with_ansi(false)
-                .with_writer(file_appender.with_max_level(Level::ERROR)),
+                .with_writer(file_appender.with_max_level(Level::TRACE)),
         )
         .try_init()
         .expect("tracing");
