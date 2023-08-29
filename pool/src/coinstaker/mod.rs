@@ -161,31 +161,11 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             let current_blockheight = client.get_blockchain_info()?.blocks;
 
             for i in latest_blockheight.try_into()?..=current_blockheight {
-                let pending_subscribers = database::get_subscribers_by_status(
-                    &cs.pool,
-                    &cs.chain.currencyid.to_string(),
-                    "pending",
-                )
-                .await?;
-
-                let active_subscribers = database::get_subscribers_by_status(
-                    &cs.pool,
-                    &cs.chain.currencyid.to_string(),
-                    "subscribed",
-                )
-                .await?;
-
                 let block = client.get_block_by_height(i, 2)?;
 
                 for tx in block.tx.iter() {
                     for vout in tx.vout.iter() {
-                        util::check_subscriptions(
-                            &mut cs,
-                            vout,
-                            &active_subscribers,
-                            &pending_subscribers,
-                        )
-                        .await?;
+                        util::check_vout(&mut cs, vout).await?;
                     }
                 }
             }
@@ -249,25 +229,12 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         )
                         .await?;
 
-                        let pending_subscribers = database::get_subscribers_by_status(
-                            &cs.pool,
-                            &cs.chain.currencyid.to_string(),
-                            "pending",
-                        )
-                        .await?;
-
                         // get additional information about the incoming block:
                         let block = client.get_block(&blockhash, 2)?;
 
                         for tx in block.tx.iter() {
                             for vout in tx.vout.iter() {
-                                util::check_subscriptions(
-                                    &mut cs,
-                                    vout,
-                                    &active_subscribers,
-                                    &pending_subscribers,
-                                )
-                                .await?;
+                                util::check_vout(&mut cs, vout).await?;
                             }
                         }
 
@@ -291,7 +258,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                             continue;
                         }
 
-                        // this has become really ugly.
+                        // FIXME: this has become really ugly.
                         // - check_for_maturity checks if any pending_stakes are stale or have matured.
                         // - this information is required when to add work, but the state is written to the database, and so we need to acquire
                         // this state again from the database to do a proper work calculation
@@ -515,7 +482,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
                     continue;
                 }
-                CoinStakerMessage::ProcessPayments() => {}
                 CoinStakerMessage::SetFeeDiscount(os_tx, new_fee) => {
                     cs.pool_fee_discount = Decimal::from_f32(new_fee).unwrap_or(Decimal::ZERO);
                     if let Err(e) = os_tx.send(cs.pool_fee_discount.to_f32().unwrap()) {
@@ -536,117 +502,13 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     continue;
                 }
                 CoinStakerMessage::CheckSubscription(os_tx, s_id) => {
-                    debug!("{s_id:?}");
-                    let client = cs.chain.verusd_client()?;
-                    if let Ok(identity) = client.get_identity(&s_id) {
-                        trace!("{:?}", identity);
-                        if let Some(subscriber) = database::get_subscriber(
-                            &cs.pool,
-                            &cs.chain.currencyid.to_string(),
-                            &identity.identity.identityaddress.to_string(),
-                        )
-                        .await?
-                        {
-                            match &*subscriber.status {
-                                "subscribed" => {
-                                    trace!("is a subscriber already");
-                                    if cs.identity_is_eligible(&identity.identity, &subscriber) {
-                                        os_tx
-                                            .send(json!({
-                                                "result":
-                                                    format!("{s_id} has an active subscription and a valid identity\n{:#?}", identity)
-                                            }))
-                                            .unwrap();
-                                    } else {
-                                        database::update_subscriber_status(
-                                            &cs.pool,
-                                            &cs.chain.currencyid.to_string(),
-                                            &identity.identity.identityaddress.to_string(),
-                                            "unsubscribed",
-                                        )
-                                        .await?;
-
-                                        let payload = Payload {
-                                            command: "unsubscribed".to_string(),
-                                            data: json!({
-                                                "identity_name": identity.fullyqualifiedname.clone(),
-                                                "identity_address": identity.identity.identityaddress.clone(),
-                                                "currency_id": cs.chain.currencyid.clone(),
-                                                "currency_name": cs.chain.name
-                                            }),
-                                        };
-                                        cs.nats_client
-                                            .publish(
-                                                "ipc.coinstaker".into(),
-                                                serde_json::to_vec(&json!(payload))?.into(),
-                                            )
-                                            .await?;
-
-                                        os_tx
-                                            .send(json!({
-                                                "result":
-                                                    format!("{s_id} ineligible, changed from subscribed to unsubscribed")
-                                            }))
-                                            .unwrap();
-                                    }
-                                }
-                                "pending" => {
-                                    if cs.identity_is_eligible(&identity.identity, &subscriber) {
-                                        database::update_subscriber_status(
-                                            &cs.pool,
-                                            &cs.chain.currencyid.to_string(),
-                                            &identity.identity.identityaddress.to_string(),
-                                            "subscribed",
-                                        )
-                                        .await?;
-
-                                        let payload = Payload {
-                                            command: "subscribed".to_string(),
-                                            data: json!({
-                                                "identity_name": identity.fullyqualifiedname.clone(),
-                                                "identity_address": identity.identity.identityaddress.clone(),
-                                                "currency_id": cs.chain.currencyid.clone(),
-                                                "currency_name": cs.chain.name
-                                            }),
-                                        };
-                                        cs.nats_client
-                                            .publish(
-                                                "ipc.coinstaker".into(),
-                                                serde_json::to_vec(&json!(payload))?.into(),
-                                            )
-                                            .await?;
-
-                                        os_tx
-                                            .send(json!({
-                                                "result":
-                                                    format!(
-                                                        "{s_id} changed from pending to subscribed"
-                                                    )
-                                            }))
-                                            .unwrap();
-                                    } else {
-                                        os_tx
-                                            .send(json!({
-                                                "result":
-                                                    format!("{s_id} ineligible, subscriber still pending")
-                                            }))
-                                            .unwrap();
-                                    }
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            os_tx
-                                .send(json!({
-                                    "result": format!("{s_id} not found in subscriptions")
-                                }))
-                                .unwrap();
-                        }
-                    } else {
-                        let _ = os_tx.send(json!({
-                            "result": format!("identity `{s_id}` does not exist")
-                        }));
-                    }
+                    let status = util::check_subscription(&cs, &s_id).await?;
+                    os_tx
+                        .send(json!({
+                            "result": "success",
+                            "status": status.to_string()
+                        }))
+                        .unwrap();
 
                     continue;
                 }
@@ -873,7 +735,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                         .send(cs.config.verus_vault_conditions.clone())
                         .unwrap();
                 }
-                CoinStakerMessage::UpdateStakeStatus(stake) => {}
+                CoinStakerMessage::UpdateStakeStatus(_stake) => {}
             }
         }
 
@@ -894,7 +756,6 @@ pub enum CoinStakerMessage {
     MaturedBlock(Stake),
     StakingSupply(oneshot::Sender<(f64, f64, f64)>, Vec<String>),
     SetFeeDiscount(oneshot::Sender<f32>, f32),
-    ProcessPayments(),
     GetIdentity(oneshot::Sender<Option<Identity>>, String),
     CheckSubscription(oneshot::Sender<serde_json::Value>, String),
     RecentStakes(oneshot::Sender<Vec<Stake>>),

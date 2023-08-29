@@ -189,98 +189,78 @@ pub async fn check_for_stake(
     Ok(())
 }
 
-pub async fn check_subscriptions(
-    cs: &mut CoinStaker,
-    vout: &TransactionVout,
-    active_subscribers: &[Subscriber],
-    pending_subscribers: &[Subscriber],
-) -> Result<(), Report> {
-    if let Some(identityprimary) = &vout.script_pubkey.identityprimary {
-        debug!("identityprimary: {identityprimary:#?}");
+pub enum SubscriptionStatus {
+    Active,
+    Pending,
+    Unsubscribed,
+    NotFound,
+}
 
-        let client = cs.chain.verusd_client()?;
-        if let Ok(identity) = client.get_identity(&identityprimary.identityaddress.to_string()) {
-            debug!("identity: {identity:?}");
+impl ToString for SubscriptionStatus {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Active => "active".to_string(),
+            Self::Pending => "pending".to_string(),
+            Self::Unsubscribed => "unsubscribed".to_string(),
+            Self::NotFound => "not found".to_string(),
+        }
+    }
+}
 
-            // check if the vout contains an update to an identity that is known to the staking pool:
-            if let Some(s) = pending_subscribers.iter().find(|db_subscriber| {
-                db_subscriber.identity_address == identityprimary.identityaddress
-                    && db_subscriber.currencyid == cs.chain.currencyid
-            }) {
-                trace!(
-                    "an update to an identity of a registered pending subscriber was found: {s:?}"
-                );
+/// Checks a subscription for this chain.
+///
+/// A user of the pool needs to have a subscription. It can be in one of three stages:
+/// - Subscribed
+/// - Pending
+/// - Unsubscribed
+///
+/// As this function can be invoked manually through the API, a SubscriptionStatus::NotFound will be returned when
+/// - the Verus daemon does not know this identity
+/// - the subscriber is not found in the database (the user has never interacted with the pool with this address)
+///
+/// A change can occur when an identity is updated:
+/// - `pending` -> `subscribed` when an identity is eligible according to the CoinStaker VaultConditions
+/// - `subscribed` -> `unsubscribed` when an identity is not eligible according to the CoinStaker VaultConditions
+///
+/// A 'unsubscribed` -> `pending` can only occur when a user does an explicit `subscribe` using the API.
+///
+/// When a change occurs in the SubscriptionStatus, a nats message is published to `ipc.coinstaker` listeners.
+#[instrument(err)]
+pub async fn check_subscription(
+    cs: &CoinStaker,
+    id_string: &str,
+) -> Result<SubscriptionStatus, Report> {
+    debug!("{id_string:?}");
+    let client = cs.chain.verusd_client()?;
 
-                if cs.identity_is_eligible(&identityprimary, &s) {
-                    trace!("pool address found in primary addresses, the subscriber is eligible and can be made active");
-                    if database::update_subscriber_status(
-                        &cs.pool,
-                        &cs.chain.currencyid.to_string(),
-                        &identityprimary.identityaddress.to_string(),
-                        "subscribed",
-                    )
-                    .await
-                    .is_ok()
-                    {
-                        trace!("db updated, send message to discord");
-
-                        let payload = Payload {
-                            command: "subscribed".to_string(),
-                            data: json!({
-                                "identity_name": identity.fullyqualifiedname.clone(),
-                                "identity_address": identityprimary.identityaddress.clone(),
-                                "currency_id": cs.chain.currencyid.clone(),
-                                "currency_name": cs.chain.name
-                            }),
-                        };
-
-                        cs.nats_client
-                            .publish(
-                                "ipc.coinstaker".into(),
-                                serde_json::to_vec(&json!(payload))?.into(),
-                            )
-                            .await?;
-                    }
-                } else {
-                    trace!(
-                    "a pending subscriber changed its ID but did not meet the requirements: {:#?}",
-                    identityprimary
-                );
-                }
-
-                return Ok(());
-            }
-
-            // check if active subscriber unsubscribed from specific chain
-            if let Some(db_subscriber) = active_subscribers.iter().find(|db_subscriber| {
-                db_subscriber.identity_address == identityprimary.identityaddress
-                    && db_subscriber.currencyid == cs.chain.currencyid
-            }) {
-                trace!("an active subscriber has changed its identity");
-                // need to check if the primary address is still the same as the bot's
-                // need to check if the minimumsignatures is 1
-                // need to check if the len is more than 1
-                if cs.identity_is_eligible(&identityprimary, db_subscriber) {
-                    trace!("the subscription is still ok for the bot")
-                } else {
-                    trace!("the subscription is not ok, we need to unsubscribe the user");
-
-                    if database::update_subscriber_status(
-                        &cs.pool,
-                        &cs.chain.currencyid.to_string(),
-                        &identityprimary.identityaddress.to_string(),
-                        "unsubscribed",
-                    )
-                    .await
-                    .is_ok()
-                    {
-                        trace!("db updated, send message to discord");
+    if let Ok(identity) = client.get_identity(id_string) {
+        trace!("{:?}", identity);
+        if let Some(subscriber) = database::get_subscriber(
+            &cs.pool,
+            &cs.chain.currencyid.to_string(),
+            &identity.identity.identityaddress.to_string(),
+        )
+        .await?
+        {
+            match &*subscriber.status {
+                "subscribed" => {
+                    trace!("is a subscriber already");
+                    if cs.identity_is_eligible(&identity.identity, &subscriber) {
+                        return Ok(SubscriptionStatus::Active);
+                    } else {
+                        database::update_subscriber_status(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                            &identity.identity.identityaddress.to_string(),
+                            "unsubscribed",
+                        )
+                        .await?;
 
                         let payload = Payload {
                             command: "unsubscribed".to_string(),
                             data: json!({
                                 "identity_name": identity.fullyqualifiedname.clone(),
-                                "identity_address": identityprimary.identityaddress.clone(),
+                                "identity_address": identity.identity.identityaddress.clone(),
                                 "currency_id": cs.chain.currencyid.clone(),
                                 "currency_name": cs.chain.name
                             }),
@@ -291,15 +271,68 @@ pub async fn check_subscriptions(
                                 serde_json::to_vec(&json!(payload))?.into(),
                             )
                             .await?;
+
+                        return Ok(SubscriptionStatus::Unsubscribed);
                     }
                 }
+                "pending" => {
+                    if cs.identity_is_eligible(&identity.identity, &subscriber) {
+                        database::update_subscriber_status(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                            &identity.identity.identityaddress.to_string(),
+                            "subscribed",
+                        )
+                        .await?;
+
+                        let payload = Payload {
+                            command: "subscribed".to_string(),
+                            data: json!({
+                                "identity_name": identity.fullyqualifiedname.clone(),
+                                "identity_address": identity.identity.identityaddress.clone(),
+                                "currency_id": cs.chain.currencyid.clone(),
+                                "currency_name": cs.chain.name
+                            }),
+                        };
+
+                        cs.nats_client
+                            .publish(
+                                "ipc.coinstaker".into(),
+                                serde_json::to_vec(&json!(payload))?.into(),
+                            )
+                            .await?;
+
+                        return Ok(SubscriptionStatus::Active);
+                    } else {
+                        trace!(
+                            "a pending subscriber changed its ID but did not meet the requirements: {:#?}",
+                            &identity.identity
+                        );
+
+                        return Ok(SubscriptionStatus::Pending);
+                    }
+                }
+                "unsubscribed" => {
+                    // TODO can an unsubscribed user automatically resubscribe when the identity is updated, thereby making
+                    // the subscription eligible again?
+
+                    return Ok(SubscriptionStatus::Unsubscribed);
+                }
+                _ => unreachable!(), // a subscription has 3 statuses in the db.
             }
         } else {
-            error!(
-                "could not get identity: {}",
-                &identityprimary.identityaddress.to_string()
-            )
+            return Ok(SubscriptionStatus::NotFound);
         }
+    } else {
+        return Ok(SubscriptionStatus::NotFound);
+    }
+}
+
+pub async fn check_vout(cs: &mut CoinStaker, vout: &TransactionVout) -> Result<(), Report> {
+    if let Some(identityprimary) = &vout.script_pubkey.identityprimary {
+        debug!("identityprimary found in vout: {}", identityprimary.name);
+
+        let _ = check_subscription(cs, &identityprimary.identityaddress.to_string()).await?;
     }
     Ok(())
 }
