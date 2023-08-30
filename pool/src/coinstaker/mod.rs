@@ -32,7 +32,10 @@ use vrsc_rpc::{
     RpcApi,
 };
 
-use crate::{coinstaker::error::CoinStakerError, payoutmanager::PayoutManager};
+use crate::{
+    coinstaker::{error::CoinStakerError, util::check_subscription},
+    payoutmanager::PayoutManager,
+};
 
 #[derive(Debug)]
 pub struct CoinStaker {
@@ -693,39 +696,40 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                 CoinStakerMessage::SetBlacklist(opt_os_tx, address, blacklist) => {
                     trace!("Setting blacklist status for {address} to {blacklist}");
 
-                    if let Some(subscriber) = database::get_subscriber(
+                    if database::get_subscriber(
                         &cs.pool,
                         &cs.chain.currencyid.to_string(),
                         &address.to_string(),
                     )
                     .await?
+                    .is_some()
                     {
-                        let new_status = if blacklist {
-                            "banned"
+                        if blacklist {
+                            if let Ok(subscriber) = database::update_subscriber_status(
+                                &cs.pool,
+                                &cs.chain.currencyid.to_string(),
+                                &address.to_string(),
+                                "banned",
+                            )
+                            .await
+                            {
+                                debug!("subscriber updated in db: {subscriber:?}");
+                                if let Some(os_tx) = opt_os_tx {
+                                    os_tx.send(subscriber).unwrap();
+                                }
+                            }
                         } else {
-                            let client = &cs.chain.verusd_client()?;
-                            let identity = client.get_identity(&address.to_string())?;
+                            // just set to unsubscribed and then check subscription
+                            database::update_subscriber_status(
+                                &cs.pool,
+                                &cs.chain.currencyid.to_string(),
+                                &address.to_string(),
+                                "unsubscribed",
+                            )
+                            .await?;
 
-                            if cs.identity_is_eligible(&identity.identity, &subscriber) {
-                                "subscribed"
-                            } else {
-                                "unsubscribed"
-                            }
+                            check_subscription(&cs, &address.to_string()).await?;
                         };
-
-                        if let Ok(subscriber) = database::update_subscriber_status(
-                            &cs.pool,
-                            &cs.chain.currencyid.to_string(),
-                            &address.to_string(),
-                            new_status,
-                        )
-                        .await
-                        {
-                            debug!("subscriber updated in db: {subscriber:?}");
-                            if let Some(os_tx) = opt_os_tx {
-                                os_tx.send(subscriber).unwrap();
-                            }
-                        }
                     }
                 }
                 CoinStakerMessage::GetVaultConditions(os_tx) => {
