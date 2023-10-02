@@ -328,6 +328,8 @@ pub async fn check_subscription(
     }
 }
 
+// Checks if a vout has an identityprimary and if it has, it checks if that identity is known to the pool
+// Any changes to the identity should be verified by the pool.
 pub async fn check_vout(cs: &mut CoinStaker, vout: &TransactionVout) -> Result<(), Report> {
     if let Some(identityprimary) = &vout.script_pubkey.identityprimary {
         debug!("identityprimary found in vout: {}", identityprimary.name);
@@ -372,12 +374,6 @@ pub async fn add_work(
                 acc
             });
 
-        // get all the pending stakes
-        // check if one of the addresses within this function is there with a pending stake
-        // add that amount of work to the address as not to punish stakers
-        debug!("{:#?}", pending_stakes);
-        debug!("{:#?}", payload);
-
         pending_stakes
             .iter()
             .inspect(|stake| trace!("{}", stake.blockheight))
@@ -394,8 +390,6 @@ pub async fn add_work(
                     });
                 }
             });
-
-        debug!("{:#?}", payload);
 
         if !payload.is_empty() {
             debug!("payload to insert: {:#?}", &payload);

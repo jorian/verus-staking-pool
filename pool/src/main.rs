@@ -18,25 +18,25 @@ mod payoutmanager;
 async fn main() -> Result<(), Report> {
     logging_setup();
 
-    let mut csm = CSM {
+    let mut controller = Controller {
         senders: HashMap::new(),
     };
 
-    if let Err(e) = csm.start().await {
-        error!("CSM error: {:?}", e);
+    if let Err(e) = controller.start().await {
+        error!("controller error: {:?}", e);
     }
 
     Ok(())
 }
 
 #[derive(Debug)]
-pub struct CSM {
+pub struct Controller {
     senders: HashMap<String, mpsc::Sender<CoinStakerMessage>>,
 }
 
-impl CSM {
+impl Controller {
     async fn start(&mut self) -> Result<(), Report> {
-        info!("starting csm");
+        info!("starting controller");
 
         let config = get_app_config().await?;
         let pg_url = config.database.connection_string();
@@ -54,11 +54,9 @@ impl CSM {
             let name = coin_staker.chain.currencyid.clone();
             self.senders.insert(name.to_string().clone(), cs_tx.clone());
 
-            // a separate work collector thread should be spawned that functions separately from Coinstaker.
-            // if coinstaker ever crashes, we at least have a worker thread that can be used to do fair payouts.
-
             handles.push(tokio::spawn(async move {
                 if let Err(e) = coinstaker::run(coin_staker).await {
+                    // TODO notifications: https://github.com/jorian/verus-staking-pool/issues/10
                     error!("Error in coinstaker {}: {:?}", name, e);
                 }
             }));

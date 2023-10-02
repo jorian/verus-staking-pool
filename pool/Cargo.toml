@@ -49,3 +49,4 @@ chrono = { version = "0.4", features = ["clock"] }
 #     "http-proto",
 # ] }
 # opentelemetry-semantic-conventions = "0.9.0"
+tokio-graceful-shutdown = "0.13.0"

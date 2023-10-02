@@ -133,37 +133,36 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             warn!("daemon is not staking, subscriber work will not be accumulated");
         }
 
-        // NATS listener
+        // A separate tokio thread that listens for messages on the NATS protocol. It's how external
+        // applications can talk to this coinstaker. For every staking coin, a separate NATS server is listening
         tokio::spawn({
             let c_tx = cs.get_mpsc_sender();
             let currencyid = cs.chain.currencyid.clone();
 
-            // waits for messages from NATS clients
             async move { nats::nats_server(currencyid, c_tx).await }
         });
 
-        // listen for blocks from the daemon through ZMQ
+        // Listens for blocks from the daemon through ZMQ
         tokio::spawn(tmq_block_listen(
             cs.config.zmq_port_blocknotify,
             cs.chain.clone(),
             cs.get_mpsc_sender(),
         ));
 
-        info!("starting to watch for messages on {}", cs.chain);
+        info!("starting to listen for messages on {}", cs.chain);
 
         // don't do startup sequence when no latest round is found
         //
         // in the period between the latest blockheight and the current blockheight, subscribers may have left.
-        // The following is to check who left.
         if let Some(mut latest_blockheight) =
             database::get_latest_round(&cs.pool, &cs.chain.currencyid.to_string()).await?
         {
-            trace!("latest_round: {latest_blockheight}"); //need to start 1 block further
+            trace!("latest_round: {latest_blockheight}");
             latest_blockheight += 1;
 
-            let current_blockheight = client.get_blockchain_info()?.blocks;
+            let chain_tip = client.get_blockchain_info()?.blocks;
 
-            for i in latest_blockheight.try_into()?..=current_blockheight {
+            for i in latest_blockheight.try_into()?..=chain_tip {
                 let block = client.get_block_by_height(i, 2)?;
 
                 for tx in block.tx.iter() {
@@ -176,14 +175,11 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
         let mut maturing_stakes =
             database::get_pending_stakes(&cs.pool, &cs.chain.currencyid.to_string()).await?;
-        debug!("pending txns {:#?}", maturing_stakes);
+        debug!("pending stakes {:#?}", maturing_stakes);
 
-        let chain_c = cs.chain.clone();
         let c_tx = cs.get_mpsc_sender();
 
-        if let Err(e) = util::check_for_maturity(chain_c, &mut maturing_stakes, c_tx).await {
-            error!("wait for maturity: {:?}", e);
-        }
+        util::check_for_maturity(cs.chain.clone(), &mut maturing_stakes, c_tx).await?;
 
         // starts a tokio thread that processes payments every period as defined.
         tokio::spawn({
@@ -215,538 +211,508 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
         });
 
         // The loop that listens for mpsc messages
-        while let Some(msg) = cs.cs_rx.recv().await {
-            match msg {
-                // in BlockNotify we do most of the work:
-                // - add work for every subscriber until this block
-                // - check if the block that was mined, was staked by one of the subscribers
-                // - check if subscribers left
-                // - check if new subscribers arrived
-                CoinStakerMessage::BlockNotify(blockhash) => {
-                    trace!("blocknotify for {}", cs.chain);
-                    if let Ok(client) = cs.chain.verusd_client() {
-                        let active_subscribers = database::get_subscribers_by_status(
-                            &cs.pool,
-                            &cs.chain.currencyid.to_string(),
-                            "subscribed",
-                        )
-                        .await?;
+        listen(&mut cs).await?;
+        // if let Err(e) = listen(&mut cs).await {
+        //     cs.
+        // }
+        warn!("no more coinstaker message receiver running, stopping staking");
+        cs.chain.verusd_client()?.set_generate(false, 0)?;
+    } else {
+        error!("{} daemon is not running", cs.chain.name);
+    }
 
-                        // get additional information about the incoming block:
-                        let block = client.get_block(&blockhash, 2)?;
+    Ok(())
+}
 
-                        for tx in block.tx.iter() {
-                            for vout in tx.vout.iter() {
-                                util::check_vout(&mut cs, vout).await?;
-                            }
-                        }
+async fn listen(cs: &mut CoinStaker) -> Result<(), Report> {
+    let verus_rpc_client = cs.chain.verusd_client()?;
+    while let Some(msg) = cs.cs_rx.recv().await {
+        match msg {
+            // in BlockNotify we do most of the work:
+            // - add work for every subscriber until this block
+            // - check if the block that was mined, was staked by one of the subscribers
+            // - check if subscribers left
+            // - check if new subscribers arrived
+            CoinStakerMessage::BlockNotify(blockhash) => {
+                trace!("blocknotify for {}", cs.chain);
+                let active_subscribers = database::get_subscribers_by_status(
+                    &cs.pool,
+                    &cs.chain.currencyid.to_string(),
+                    "subscribed",
+                )
+                .await?;
 
-                        let mut pending_stakes = database::get_pending_stakes(
-                            &cs.pool,
-                            &cs.chain.currencyid.to_string(),
-                        )
-                        .await?;
+                // get additional information about the incoming block:
+                let block = verus_rpc_client.get_block(&blockhash, 2)?;
 
-                        util::check_for_maturity(
-                            cs.chain.clone(),
-                            &mut pending_stakes,
-                            cs.get_mpsc_sender(),
-                        )
-                        .await?;
-
-                        // break if daemon is not staking
-                        if !client.get_mining_info()?.staking {
-                            warn!("daemon not staking, not counting work");
-
-                            continue;
-                        }
-
-                        // FIXME: this has become really ugly.
-                        // - check_for_maturity checks if any pending_stakes are stale or have matured.
-                        // - this information is required when to add work, but the state is written to the database, and so we need to acquire
-                        // this state again from the database to do a proper work calculation
-                        // ideally, you would want to keep it in memory and update the memory during these checks,
-                        // but then we get to manage 2 different states;
-                        // the database and the in-memory temporary state.
-
-                        if let Err(e) =
-                            util::check_for_stake(&block, &active_subscribers, &mut cs).await
-                        {
-                            error!("{:?}\n{:#?}\n{:#?}", e, &block, &active_subscribers);
-                        };
-
-                        let pending_stakes = database::get_pending_stakes(
-                            &cs.pool,
-                            &cs.chain.currencyid.to_string(),
-                        )
-                        .await?;
-
-                        util::add_work(
-                            &active_subscribers
-                                .iter()
-                                .filter(|subscriber| {
-                                    if let Ok(identity) = client.get_identity_history(
-                                        &subscriber.identity_address.to_string(),
-                                        0,
-                                        99999999,
-                                    ) {
-                                        // identities need a 150 block cooldown if they were updated, before they can stake
-                                        identity.blockheight
-                                            < block.height.checked_sub(150).unwrap_or(0) as i64
-                                    } else {
-                                        false
-                                    }
-                                })
-                                .cloned()
-                                .collect::<Vec<Subscriber>>(),
-                            &pending_stakes,
-                            &client,
-                            &mut cs,
-                            block.height,
-                        )
-                        .await?;
-
-                        continue;
+                for tx in block.tx.iter() {
+                    for vout in tx.vout.iter() {
+                        util::check_vout(cs, vout).await?;
                     }
+                }
+
+                let mut pending_stakes =
+                    database::get_pending_stakes(&cs.pool, &cs.chain.currencyid.to_string())
+                        .await?;
+
+                util::check_for_maturity(
+                    cs.chain.clone(),
+                    &mut pending_stakes,
+                    cs.get_mpsc_sender(),
+                )
+                .await?;
+
+                if !verus_rpc_client.get_mining_info()?.staking {
+                    warn!("daemon not staking, not counting work");
 
                     continue;
                 }
-                CoinStakerMessage::StaleBlock(mut stake) => {
-                    database::move_work_to_current_round(
-                        &cs.pool,
-                        &cs.chain.currencyid.to_string(),
-                        stake.blockheight,
+
+                if let Err(e) = util::check_for_stake(&block, &active_subscribers, cs).await {
+                    error!("{:?}\n{:#?}\n{:#?}", e, &block, &active_subscribers);
+                };
+
+                let pending_stakes =
+                    database::get_pending_stakes(&cs.pool, &cs.chain.currencyid.to_string())
+                        .await?;
+
+                util::add_work(
+                    &active_subscribers
+                        .iter()
+                        .filter(|subscriber| {
+                            if let Ok(identity) = verus_rpc_client.get_identity_history(
+                                &subscriber.identity_address.to_string(),
+                                0,
+                                99999999,
+                            ) {
+                                // identities need a 150 block cooldown if they were updated, before they can stake
+                                identity.blockheight
+                                    < block.height.checked_sub(150).unwrap_or(0) as i64
+                            } else {
+                                false
+                            }
+                        })
+                        .cloned()
+                        .collect::<Vec<Subscriber>>(),
+                    &pending_stakes,
+                    &verus_rpc_client,
+                    cs,
+                    block.height,
+                )
+                .await?;
+            }
+            CoinStakerMessage::StaleBlock(mut stake) => {
+                database::move_work_to_current_round(
+                    &cs.pool,
+                    &cs.chain.currencyid.to_string(),
+                    stake.blockheight,
+                )
+                .await?;
+
+                stake.set_result("stale")?;
+
+                // need to update postgres
+                database::set_stake_result(&cs.pool, &stake).await?;
+
+                let payload = Payload {
+                    command: "stale".to_string(),
+                    data: json!({
+                        "blockhash": stake.blockhash,
+                        "blockheight": stake.blockheight,
+                        "chain_name": cs.chain.name,
+                    }),
+                };
+
+                cs.nats_client
+                    .publish(
+                        "ipc.coinstaker".into(),
+                        serde_json::to_vec(&json!(payload))?.into(),
                     )
                     .await?;
+            }
+            CoinStakerMessage::StolenBlock(mut stake) => {
+                database::move_work_to_current_round(
+                    &cs.pool,
+                    &cs.chain.currencyid.to_string(),
+                    stake.blockheight,
+                )
+                .await?;
 
-                    stake.set_result("stale")?;
+                stake.set_result("stolen")?;
 
-                    // need to update postgres
-                    database::set_stake_result(&cs.pool, &stake).await?;
+                database::set_stake_result(&cs.pool, &stake).await?;
 
-                    let payload = Payload {
-                        command: "stale".to_string(),
-                        data: json!({
-                            "blockhash": stake.blockhash,
-                            "blockheight": stake.blockheight,
-                            "chain_name": cs.chain.name,
-                        }),
-                    };
+                cs.get_mpsc_sender()
+                    .send(CoinStakerMessage::SetBlacklist(None, stake.mined_by, true))
+                    .await?;
+            }
+            CoinStakerMessage::MaturedBlock(mut stake) => {
+                stake.set_result("mature")?;
 
-                    cs.nats_client
-                        .publish(
-                            "ipc.coinstaker".into(),
-                            serde_json::to_vec(&json!(payload))?.into(),
+                // set the stake to processed, as the wait for maturity is over.
+                database::set_stake_result(&cs.pool, &stake).await?;
+
+                tokio::spawn({
+                    let pool = cs.pool.clone();
+                    let stake = stake.clone();
+                    let pool_fee_discount = cs.pool_fee_discount;
+                    let pool_identity_address = cs.pool_identity_address.clone();
+                    let nats_client = cs.nats_client.clone();
+                    let chain_name = cs.chain.name.clone();
+
+                    let client = cs.chain.verusd_client()?;
+                    let mined_by_name = client
+                        .get_identity(&stake.mined_by.to_string())?
+                        .fullyqualifiedname;
+
+                    async move {
+                        let payout = PayoutManager::create_payout(
+                            &pool,
+                            &stake,
+                            pool_fee_discount,
+                            pool_identity_address,
                         )
                         .await?;
-                }
-                CoinStakerMessage::StolenBlock(mut stake) => {
-                    database::move_work_to_current_round(
-                        &cs.pool,
-                        &cs.chain.currencyid.to_string(),
-                        stake.blockheight,
-                    )
-                    .await?;
 
-                    stake.set_result("stolen")?;
+                        PayoutManager::store_payout_in_database(&pool, &payout).await?;
 
-                    database::set_stake_result(&cs.pool, &stake).await?;
+                        let payload = Payload {
+                            command: "matured".to_string(),
+                            data: json!({
+                                "chain": chain_name,
+                                "blockhash": payout.blockhash.to_string(),
+                                "blockheight": stake.blockheight,
+                                "staked_by": mined_by_name,
+                                "rewards": payout.amount_paid_to_subs.as_sat(),
+                                "n_subs": payout.members.len()
+                            }),
+                        };
 
-                    cs.get_mpsc_sender()
-                        .send(CoinStakerMessage::SetBlacklist(None, stake.mined_by, true))
-                        .await?;
-
-                    // blacklist the user
-                    // move work back to round 0
-                    // nats a message
-                }
-                CoinStakerMessage::MaturedBlock(mut stake) => {
-                    stake.set_result("mature")?;
-
-                    // set the stake to processed, as the wait for maturity is over.
-                    database::set_stake_result(&cs.pool, &stake).await?;
-
-                    tokio::spawn({
-                        let pool = cs.pool.clone();
-                        let stake = stake.clone();
-                        let pool_fee_discount = cs.pool_fee_discount;
-                        let pool_identity_address = cs.pool_identity_address.clone();
-                        let nats_client = cs.nats_client.clone();
-                        let chain_name = cs.chain.name.clone();
-
-                        let client = cs.chain.verusd_client()?;
-                        let mined_by_name = client
-                            .get_identity(&stake.mined_by.to_string())?
-                            .fullyqualifiedname;
-
-                        async move {
-                            let payout = PayoutManager::create_payout(
-                                &pool,
-                                &stake,
-                                pool_fee_discount,
-                                pool_identity_address,
+                        nats_client
+                            .publish(
+                                "ipc.coinstaker".into(),
+                                serde_json::to_vec(&json!(payload))?.into(),
                             )
                             .await?;
 
-                            PayoutManager::store_payout_in_database(&pool, &payout).await?;
+                        Ok::<(), Report>(())
+                    }
+                });
+            }
+            CoinStakerMessage::StakingSupply(os_tx, identities) => {
+                let client = cs.chain.verusd_client()?;
+                let wallet_info = client.get_wallet_info()?;
+                let pool_supply = wallet_info.eligible_staking_balance.as_vrsc();
+                let mining_info = client.get_mining_info()?;
+                let network_supply = mining_info.stakingsupply;
+                let my_supply = if identities.len() > 0 {
+                    let mut subscriptions = database::get_subscriptions(
+                        &cs.pool,
+                        &cs.chain.currencyid.to_string(),
+                        &identities,
+                    )
+                    .await?;
 
-                            let payload = Payload {
-                                command: "matured".to_string(),
-                                data: json!({
-                                    "chain": chain_name,
-                                    "blockhash": payout.blockhash.to_string(),
-                                    "blockheight": stake.blockheight,
-                                    "staked_by": mined_by_name,
-                                    "rewards": payout.amount_paid_to_subs.as_sat(),
-                                    "n_subs": payout.members.len()
-                                }),
+                    trace!("subscriptions found: {subscriptions:#?}");
+
+                    subscriptions = subscriptions
+                        .into_iter()
+                        .filter(|s| {
+                            let is_subscribed = &s.status == "subscribed";
+                            let is_cooled_down = if let Ok(identity) = client.get_identity_history(
+                                &s.identity_address.to_string(),
+                                0,
+                                9999999,
+                            ) {
+                                let block =
+                                    client.get_block_by_height(mining_info.blocks, 2).unwrap();
+
+                                identity.blockheight
+                                    < block.height.checked_sub(150).unwrap_or(0) as i64
+                            } else {
+                                false
                             };
 
-                            nats_client
-                                .publish(
-                                    "ipc.coinstaker".into(),
-                                    serde_json::to_vec(&json!(payload))?.into(),
-                                )
-                                .await?;
+                            is_subscribed && is_cooled_down
+                        })
+                        .collect::<Vec<_>>();
 
-                            Ok::<(), Report>(())
-                        }
-                    });
+                    trace!("eligible subscriptions found: {subscriptions:#?}");
 
-                    continue;
+                    if !subscriptions.is_empty() {
+                        let lu = client
+                            .list_unspent(
+                                Some(150),
+                                Some(9999999),
+                                Some(
+                                    &subscriptions
+                                        .into_iter()
+                                        .map(|sub| sub.identity_address)
+                                        .collect::<Vec<Address>>(),
+                                ),
+                            )?
+                            .iter()
+                            .fold(SignedAmount::ZERO, |acc, sum| acc + sum.amount);
+
+                        lu.as_vrsc()
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+                if let Err(e) = os_tx.send((network_supply, pool_supply, my_supply)) {
+                    error!("{e:?}");
                 }
-                CoinStakerMessage::StakingSupply(os_tx, identities) => {
-                    let client = cs.chain.verusd_client()?;
-                    let wallet_info = client.get_wallet_info()?;
-                    let pool_supply = wallet_info.eligible_staking_balance.as_vrsc();
-                    let mining_info = client.get_mining_info()?;
-                    let network_supply = mining_info.stakingsupply;
-                    let my_supply = if identities.len() > 0 {
-                        let mut subscriptions = database::get_subscriptions(
+            }
+            CoinStakerMessage::SetFeeDiscount(os_tx, new_fee) => {
+                cs.pool_fee_discount = Decimal::from_f32(new_fee).unwrap_or(Decimal::ZERO);
+                if let Err(e) = os_tx.send(cs.pool_fee_discount.to_f32().unwrap()) {
+                    error!("{e:?}");
+                }
+            }
+            CoinStakerMessage::GetIdentity(os_tx, s_id) => {
+                debug!("{s_id:?}");
+                let client = cs.chain.verusd_client()?;
+                if let Ok(identity) = client.get_identity(&s_id) {
+                    let _ = os_tx.send(Some(identity));
+                } else {
+                    let _ = os_tx.send(None);
+                }
+            }
+            CoinStakerMessage::CheckSubscription(os_tx, s_id) => {
+                let status = util::check_subscription(&cs, &s_id).await?;
+                os_tx
+                    .send(json!({
+                        "result": "success",
+                        "status": status.to_string()
+                    }))
+                    .unwrap();
+            }
+            CoinStakerMessage::RecentStakes(os_tx) => {
+                let pool = &cs.pool;
+                let duration = Duration::days(7); //secs(60 * 60 * 24 * 7);
+                let mut since: DateTime<Utc> = chrono::offset::Utc::now();
+                since.sub_assign(duration);
+                let stakes =
+                    database::get_recent_stakes(pool, &cs.chain.currencyid.to_string(), since)
+                        .await?;
+
+                os_tx.send(stakes).unwrap();
+            }
+            CoinStakerMessage::SetMinPayout(os_tx, identity_str, threshold) => {
+                // controller.update_min_payout(identity_str, threshold).await?;
+                // oneshot_tx.send(response)
+                if let Ok(identity) = verus_rpc_client.get_identity(&identity_str) {
+                    if let Some(subscriber) = database::get_subscriber(
+                        &cs.pool,
+                        &cs.chain.currencyid.to_string(),
+                        &identity.identity.identityaddress.to_string(),
+                    )
+                    .await?
+                    {
+                        database::update_subscriber_min_payout(
                             &cs.pool,
-                            &cs.chain.currencyid.to_string(),
-                            &identities,
+                            &subscriber.currencyid.to_string(),
+                            &subscriber.identity_address.to_string(),
+                            threshold,
                         )
                         .await?;
 
-                        trace!("subscriptions found: {subscriptions:#?}");
-
-                        subscriptions = subscriptions
-                            .into_iter()
-                            .filter(|s| {
-                                let is_subscribed = &s.status == "subscribed";
-                                let is_cooled_down = if let Ok(identity) = client
-                                    .get_identity_history(
-                                        &s.identity_address.to_string(),
-                                        0,
-                                        9999999,
-                                    ) {
-                                    let block =
-                                        client.get_block_by_height(mining_info.blocks, 2).unwrap();
-
-                                    identity.blockheight
-                                        < block.height.checked_sub(150).unwrap_or(0) as i64
-                                } else {
-                                    false
-                                };
-
-                                is_subscribed && is_cooled_down
-                            })
-                            .collect::<Vec<_>>();
-
-                        trace!("eligible subscriptions found: {subscriptions:#?}");
-
-                        if !subscriptions.is_empty() {
-                            let lu = client
-                                .list_unspent(
-                                    Some(150),
-                                    Some(9999999),
-                                    Some(
-                                        &subscriptions
-                                            .into_iter()
-                                            .map(|sub| sub.identity_address)
-                                            .collect::<Vec<Address>>(),
-                                    ),
-                                )?
-                                .iter()
-                                .fold(SignedAmount::ZERO, |acc, sum| acc + sum.amount);
-
-                            lu.as_vrsc()
-                        } else {
-                            0.0
-                        }
+                        let _ = os_tx.send(json!({
+                            "result":
+                                format!(
+                                    "Minimum payout threshold for `{}` updated to {}",
+                                    identity.fullyqualifiedname,
+                                    Amount::from_sat(threshold).as_vrsc()
+                                )
+                        }));
                     } else {
-                        0.0
-                    };
-
-                    if let Err(e) = os_tx.send((network_supply, pool_supply, my_supply)) {
-                        error!("{e:?}");
+                        let _ = os_tx.send(json!({
+                            "result": format!("No subscriber found for {identity_str}")
+                        }));
                     }
-
-                    continue;
+                } else {
+                    let _ = os_tx.send(json!({
+                        "result":
+                            format!("Identity `{identity_str}` not found on {}", cs.chain.name)
+                    }));
                 }
-                CoinStakerMessage::SetFeeDiscount(os_tx, new_fee) => {
-                    cs.pool_fee_discount = Decimal::from_f32(new_fee).unwrap_or(Decimal::ZERO);
-                    if let Err(e) = os_tx.send(cs.pool_fee_discount.to_f32().unwrap()) {
-                        error!("{e:?}");
-                    }
+            }
+            CoinStakerMessage::PendingStakes(os_tx) => {
+                let pool = &cs.pool;
 
-                    continue;
-                }
-                CoinStakerMessage::GetIdentity(os_tx, s_id) => {
-                    debug!("{s_id:?}");
-                    let client = cs.chain.verusd_client()?;
-                    if let Ok(identity) = client.get_identity(&s_id) {
-                        let _ = os_tx.send(Some(identity));
-                    } else {
-                        let _ = os_tx.send(None);
-                    }
+                let stakes =
+                    database::get_pending_stakes(pool, &cs.chain.currencyid.to_string()).await?;
 
-                    continue;
-                }
-                CoinStakerMessage::CheckSubscription(os_tx, s_id) => {
-                    let status = util::check_subscription(&cs, &s_id).await?;
-                    os_tx
-                        .send(json!({
-                            "result": "success",
-                            "status": status.to_string()
-                        }))
-                        .unwrap();
+                os_tx.send(stakes).unwrap();
+            }
+            CoinStakerMessage::Heartbeat(os_tx) => os_tx.send(()).unwrap(),
+            CoinStakerMessage::GetSubscriptions(os_tx, identityaddresses) => {
+                let subscribers = database::get_subscribers(
+                    &cs.pool,
+                    &cs.chain.currencyid.to_string(),
+                    &identityaddresses,
+                )
+                .await?;
 
-                    continue;
-                }
-                CoinStakerMessage::RecentStakes(os_tx) => {
-                    let pool = &cs.pool;
-                    let duration = Duration::days(7); //secs(60 * 60 * 24 * 7);
-                    let mut since: DateTime<Utc> = chrono::offset::Utc::now();
-                    since.sub_assign(duration);
-                    let stakes =
-                        database::get_recent_stakes(pool, &cs.chain.currencyid.to_string(), since)
-                            .await?;
+                os_tx.send(subscribers).unwrap();
+            }
+            CoinStakerMessage::SetStaking(os_tx, generate) => {
+                let client = cs.chain.verusd_client()?;
 
-                    os_tx.send(stakes).unwrap();
-                }
-                CoinStakerMessage::SetMinPayout(os_tx, identity_str, threshold) => {
-                    // get the identity address:
-                    let client = cs.chain.verusd_client()?;
-                    if let Ok(identity) = client.get_identity(&identity_str) {
-                        // get the subscriber for this address:
-                        if let Some(subscriber) = database::get_subscriber(
+                client.set_generate(generate, 0)?;
+
+                os_tx.send(()).unwrap();
+            }
+            CoinStakerMessage::NewSubscriber(os_tx, identitystr) => {
+                match cs.chain.verusd_client()?.get_identity(&identitystr) {
+                    Ok(identity) => {
+                        if let Some(existing_subscriber) = database::get_subscriber(
                             &cs.pool,
                             &cs.chain.currencyid.to_string(),
                             &identity.identity.identityaddress.to_string(),
                         )
                         .await?
                         {
-                            database::update_subscriber_min_payout(
-                                &cs.pool,
-                                &subscriber.currencyid.to_string(),
-                                &subscriber.identity_address.to_string(),
-                                threshold,
-                            )
-                            .await?;
-
-                            let _ = os_tx.send(json!({
-                                "result":
-                                    format!(
-                                        "Minimum payout threshold for `{}` updated to {}",
-                                        identity.fullyqualifiedname,
-                                        Amount::from_sat(threshold).as_vrsc()
-                                    )
-                            }));
-                        } else {
-                            let _ = os_tx.send(json!({
-                                "result": format!("No subscriber found for {identity_str}")
-                            }));
-                        }
-                    } else {
-                        let _ = os_tx.send(json!({
-                            "result":
-                                format!("Identity `{identity_str}` not found on {}", cs.chain.name)
-                        }));
-                    }
-                }
-                CoinStakerMessage::PendingStakes(os_tx) => {
-                    let pool = &cs.pool;
-
-                    let stakes =
-                        database::get_pending_stakes(pool, &cs.chain.currencyid.to_string())
-                            .await?;
-
-                    os_tx.send(stakes).unwrap();
-                }
-                CoinStakerMessage::Heartbeat(os_tx) => os_tx.send(()).unwrap(),
-                CoinStakerMessage::GetSubscriptions(os_tx, identityaddresses) => {
-                    let subscribers = database::get_subscribers(
-                        &cs.pool,
-                        &cs.chain.currencyid.to_string(),
-                        &identityaddresses,
-                    )
-                    .await?;
-
-                    os_tx.send(subscribers).unwrap();
-                }
-                CoinStakerMessage::SetStaking(os_tx, generate) => {
-                    let client = cs.chain.verusd_client()?;
-
-                    client.set_generate(generate, 0)?;
-
-                    os_tx.send(()).unwrap();
-                }
-                CoinStakerMessage::NewSubscriber(os_tx, identitystr) => {
-                    match client.get_identity(&identitystr) {
-                        Ok(identity) => {
-                            if let Some(existing_subscriber) = database::get_subscriber(
-                                &cs.pool,
-                                &cs.chain.currencyid.to_string(),
-                                &identity.identity.identityaddress.to_string(),
-                            )
-                            .await?
+                            debug!("{existing_subscriber:#?}");
+                            if ["unsubscribed", "pending", ""]
+                                .contains(&&*existing_subscriber.status)
                             {
-                                debug!("{existing_subscriber:#?}");
-                                if ["unsubscribed", "pending", ""]
-                                    .contains(&&*existing_subscriber.status)
+                                trace!("use existing address if user is still pending or is unsubscribed or has no status");
+                                trace!("update db, set subscriber status to pending");
+
+                                // TODO a unsubscribed user could've unlocked and locked it's ID. At this point, the
+                                // check for eligility should already pass and the user can join the pool immediately
+
+                                if cs.identity_is_eligible(&identity.identity, &existing_subscriber)
                                 {
-                                    trace!("use existing address if user is still pending or is unsubscribed or has no status");
-                                    trace!("update db, set subscriber status to pending");
-
-                                    // TODO a unsubscribed user could've unlocked and locked it's ID. At this point, the
-                                    // check for eligility should already pass and the user can join the pool immediately
-
-                                    if cs.identity_is_eligible(
-                                        &identity.identity,
-                                        &existing_subscriber,
-                                    ) {
-                                        database::update_subscriber_status(
-                                            &cs.pool,
-                                            &cs.chain.currencyid.to_string(),
-                                            &identity.identity.identityaddress.to_string(),
-                                            "subscribed",
-                                        )
-                                        .await?;
-                                    } else {
-                                        database::update_subscriber_status(
-                                            &cs.pool,
-                                            &cs.chain.currencyid.to_string(),
-                                            &identity.identity.identityaddress.to_string(),
-                                            "pending",
-                                        )
-                                        .await?;
-                                    }
-                                    os_tx.send(Ok(existing_subscriber)).unwrap();
-                                } else {
-                                    trace!("the user has an active subscription");
-
-                                    os_tx
-                                        .send(Err(CoinStakerError::SubscriberAlreadyExists(
-                                            existing_subscriber.identity_name.clone(),
-                                        )
-                                        .into()))
-                                        .unwrap();
-                                }
-                            } else {
-                                trace!("get new pool address for new subscriber");
-
-                                if let Ok(address) = client.get_new_address() {
-                                    debug!("new address: {address:?}");
-
-                                    let new_subscriber = database::insert_subscriber(
+                                    database::update_subscriber_status(
                                         &cs.pool,
                                         &cs.chain.currencyid.to_string(),
                                         &identity.identity.identityaddress.to_string(),
-                                        &identity.fullyqualifiedname,
-                                        "pending",
-                                        &address.to_string(),
-                                        cs.chain.default_pool_fee,
-                                        cs.chain.default_min_payout,
+                                        "subscribed",
                                     )
                                     .await?;
-
-                                    os_tx.send(Ok(new_subscriber)).unwrap();
+                                } else {
+                                    database::update_subscriber_status(
+                                        &cs.pool,
+                                        &cs.chain.currencyid.to_string(),
+                                        &identity.identity.identityaddress.to_string(),
+                                        "pending",
+                                    )
+                                    .await?;
                                 }
-                            }
-                        }
-                        Err(_e) => {
-                            os_tx
-                                .send(Err(CoinStakerError::IdentityNotValid(
-                                    identitystr.to_string(),
-                                )
-                                .into()))
-                                .unwrap();
-                        }
-                    }
-                }
-                CoinStakerMessage::GetPayouts(os_tx, identityaddresses) => {
-                    // get all payouts from the database for the combination of currencyid and every identityaddress in the vec
-                    let payouts = database::get_payouts(
-                        &cs.pool,
-                        &cs.chain.currencyid.to_string(),
-                        &identityaddresses,
-                    )
-                    .await?;
+                                os_tx.send(Ok(existing_subscriber)).unwrap();
+                            } else {
+                                trace!("the user has an active subscription");
 
-                    os_tx.send(payouts).unwrap();
-                }
-                CoinStakerMessage::GetPoolFees(os_tx) => {
-                    let fees =
-                        database::get_pool_fees(&cs.pool, &cs.chain.currencyid.to_string()).await?;
-
-                    os_tx.send(fees).unwrap();
-                }
-                CoinStakerMessage::SetBlacklist(opt_os_tx, address, blacklist) => {
-                    trace!("Setting blacklist status for {address} to {blacklist}");
-
-                    if database::get_subscriber(
-                        &cs.pool,
-                        &cs.chain.currencyid.to_string(),
-                        &address.to_string(),
-                    )
-                    .await?
-                    .is_some()
-                    {
-                        if blacklist {
-                            if let Ok(subscriber) = database::update_subscriber_status(
-                                &cs.pool,
-                                &cs.chain.currencyid.to_string(),
-                                &address.to_string(),
-                                "banned",
-                            )
-                            .await
-                            {
-                                debug!("subscriber updated in db: {subscriber:?}");
-                                if let Some(os_tx) = opt_os_tx {
-                                    os_tx.send(subscriber).unwrap();
-                                }
+                                os_tx
+                                    .send(Err(CoinStakerError::SubscriberAlreadyExists(
+                                        existing_subscriber.identity_name.clone(),
+                                    )
+                                    .into()))
+                                    .unwrap();
                             }
                         } else {
-                            // just set to unsubscribed and then check subscription
-                            database::update_subscriber_status(
-                                &cs.pool,
-                                &cs.chain.currencyid.to_string(),
-                                &address.to_string(),
-                                "unsubscribed",
-                            )
-                            .await?;
+                            trace!("get new pool address for new subscriber");
 
-                            check_subscription(&cs, &address.to_string()).await?;
-                        };
+                            let client = cs.chain.verusd_client()?;
+                            if let Ok(address) = client.get_new_address() {
+                                debug!("new address: {address:?}");
+
+                                let new_subscriber = database::insert_subscriber(
+                                    &cs.pool,
+                                    &cs.chain.currencyid.to_string(),
+                                    &identity.identity.identityaddress.to_string(),
+                                    &identity.fullyqualifiedname,
+                                    "pending",
+                                    &address.to_string(),
+                                    cs.chain.default_pool_fee,
+                                    cs.chain.default_min_payout,
+                                )
+                                .await?;
+
+                                os_tx.send(Ok(new_subscriber)).unwrap();
+                            }
+                        }
+                    }
+                    Err(_e) => {
+                        os_tx
+                            .send(Err(CoinStakerError::IdentityNotValid(
+                                identitystr.to_string(),
+                            )
+                            .into()))
+                            .unwrap();
                     }
                 }
-                CoinStakerMessage::GetVaultConditions(os_tx) => {
-                    trace!("getting vaultconditions");
-
-                    os_tx
-                        .send(cs.config.verus_vault_conditions.clone())
-                        .unwrap();
-                }
-                CoinStakerMessage::UpdateStakeStatus(_stake) => {}
             }
-        }
+            CoinStakerMessage::GetPayouts(os_tx, identityaddresses) => {
+                // get all payouts from the database for the combination of currencyid and every identityaddress in the vec
+                let payouts = database::get_payouts(
+                    &cs.pool,
+                    &cs.chain.currencyid.to_string(),
+                    &identityaddresses,
+                )
+                .await?;
 
-        trace!("no more coinstaker message receiver running, stopping staking");
-        cs.chain.verusd_client()?.set_generate(false, 0)?;
-    } else {
-        error!("{} daemon is not running", cs.chain.name);
+                os_tx.send(payouts).unwrap();
+            }
+            CoinStakerMessage::GetPoolFees(os_tx) => {
+                let fees =
+                    database::get_pool_fees(&cs.pool, &cs.chain.currencyid.to_string()).await?;
+
+                os_tx.send(fees).unwrap();
+            }
+            CoinStakerMessage::SetBlacklist(opt_os_tx, address, blacklist) => {
+                trace!("Setting blacklist status for {address} to {blacklist}");
+
+                if database::get_subscriber(
+                    &cs.pool,
+                    &cs.chain.currencyid.to_string(),
+                    &address.to_string(),
+                )
+                .await?
+                .is_some()
+                {
+                    if blacklist {
+                        if let Ok(subscriber) = database::update_subscriber_status(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                            &address.to_string(),
+                            "banned",
+                        )
+                        .await
+                        {
+                            debug!("subscriber updated in db: {subscriber:?}");
+                            if let Some(os_tx) = opt_os_tx {
+                                os_tx.send(subscriber).unwrap();
+                            }
+                        }
+                    } else {
+                        // just set to unsubscribed and then check subscription
+                        database::update_subscriber_status(
+                            &cs.pool,
+                            &cs.chain.currencyid.to_string(),
+                            &address.to_string(),
+                            "unsubscribed",
+                        )
+                        .await?;
+
+                        check_subscription(&cs, &address.to_string()).await?;
+                    };
+                }
+            }
+            CoinStakerMessage::GetVaultConditions(os_tx) => {
+                trace!("getting vaultconditions");
+
+                os_tx
+                    .send(cs.config.verus_vault_conditions.clone())
+                    .unwrap();
+            }
+            CoinStakerMessage::UpdateStakeStatus(_stake) => {}
+        }
     }
 
     Ok(())
