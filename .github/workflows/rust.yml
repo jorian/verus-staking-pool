@@ -40,4 +40,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/test
+          SQLX_OFFLINE: true
         run: cargo test -- payout
