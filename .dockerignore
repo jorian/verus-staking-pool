@@ -1,0 +1,7 @@
+.env
+.gitignore
+target/
+Dockerfile
+logs/
+coin_config/
+config/
