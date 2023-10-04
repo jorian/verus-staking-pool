@@ -34,7 +34,10 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test
     steps: 
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -- payout
+      - env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/test
+        run: cargo test -- payout
