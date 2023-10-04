@@ -11,10 +11,25 @@ env:
 
 jobs:
   check:
-    name: "Cargo check"
+    name: "cargo check"
     runs-on: "ubuntu-latest"
     steps: 
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --all-features
   
+  test: 
+    name: "cargo test"
+    runs-on: "ubuntu-latest"
+    services:
+      postgres:
+        image: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps: 
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -- payout
