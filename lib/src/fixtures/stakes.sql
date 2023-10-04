@@ -1,4 +1,4 @@
-INSERT INTO public.stakes (currencyid, blockhash, amount, mined_by, pos_source_txid, pos_source_vout_num, pos_source_amount, blockheight, status)
+INSERT INTO public.stakes (currencyid, blockhash, amount, mined_by, pos_source_txid, pos_source_vout_num, pos_source_amount, blockheight, status, created_at, updated_at)
 VALUES (
     'i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV',
     '00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0',
@@ -8,7 +8,9 @@ VALUES (
     0,
     600100000,
     513251,
-    'pending'
+    'pending',
+    '2023-10-01T14:15:35.237140731Z',
+    '2023-10-01T14:15:35.237140731Z'
 ),(
     'i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV',
     '00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e1',
@@ -18,6 +20,8 @@ VALUES (
     0,
     600100000,
     22222,
-    'pending'
+    'pending',
+    '2023-10-02T14:15:35.237140731Z',
+    '2023-10-02T14:15:35.237140731Z'
 );
 
