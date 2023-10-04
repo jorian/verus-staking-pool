@@ -417,7 +417,7 @@ pub async fn upsert_work(
         AND work.address = EXCLUDED.address",
     );
 
-    query_builder.build().execute(&mut tx).await?;
+    query_builder.build().execute(&mut *tx).await?;
 
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
         "INSERT INTO latest_state (currencyid, address, latest_round, latest_work) ",
@@ -448,7 +448,7 @@ pub async fn upsert_work(
         AND latest_state.address = EXCLUDED.address",
     );
 
-    query_builder.build().execute(&mut tx).await?;
+    query_builder.build().execute(&mut *tx).await?;
 
     tx.commit().await?;
 
@@ -669,7 +669,7 @@ pub async fn insert_payout_members(pool: &PgPool, payout: &Payout) -> Result<(),
             .push_bind(tuple.6);
     });
 
-    query_builder.build().execute(&mut tx).await?;
+    query_builder.build().execute(&mut *tx).await?;
     tx.commit().await?;
 
     Ok(())
@@ -747,7 +747,7 @@ pub async fn update_payment_members(
     AND ppm.identityaddress = pm.identityaddress",
     );
 
-    query_builder.build().execute(&mut tx).await?;
+    query_builder.build().execute(&mut *tx).await?;
     tx.commit().await?;
 
     Ok(())
@@ -828,7 +828,7 @@ mod tests {
             .unwrap();
 
         let inserted_transaction = sqlx::query("SELECT * FROM transactions")
-            .fetch_one(&mut conn)
+            .fetch_one(&mut *conn)
             .await?;
 
         assert!(inserted_transaction.get::<String, &str>("identityaddress") == ALICE.to_string());
@@ -902,7 +902,7 @@ mod tests {
         .unwrap();
 
         let inserted_subscriber = sqlx::query("SELECT * FROM subscriptions")
-            .fetch_one(&mut conn)
+            .fetch_one(&mut *conn)
             .await?;
 
         assert_eq!(
@@ -939,7 +939,7 @@ mod tests {
         upsert_work(&pool, VRSC, &payload, 1).await.unwrap();
 
         let work = sqlx::query("SELECT * FROM work")
-            .fetch_all(&mut conn)
+            .fetch_all(&mut *conn)
             .await?;
 
         assert!(work.len() == 2);
@@ -960,7 +960,7 @@ mod tests {
         move_work_to_current_round(&pool, VRSC, 1).await.unwrap();
 
         let work = sqlx::query("SELECT * FROM work")
-            .fetch_all(&mut conn)
+            .fetch_all(&mut *conn)
             .await?;
 
         assert!(work

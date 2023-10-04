@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * \n        FROM payout_members \n        WHERE currencyid = $1 \n        AND identityaddress IN (SELECT * FROM UNNEST($2::text[]))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "currencyid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "blockhash",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "identityaddress",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "shares",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "reward",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "fee",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "payment_txid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "blockheight",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "ca92a36802d1e2135a89c2b4066198913b6afc49fe5bea34d1db10f15969f25b"
+}

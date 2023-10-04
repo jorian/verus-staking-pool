@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT identityaddress, latest_work\n        FROM subscriptions\n        INNER JOIN latest_state ON identityaddress = address\n        WHERE latest_state.currencyid = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "identityaddress",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "latest_work",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "11132ce068a3289332c6be267ff3bd23575efc4d9c58586aa96796e97e5c0bd5"
+}

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO transactions(currencyid, txid, identityaddress, amount, shares) \n        VALUES ($1, $2, $3, $4, $5)\n    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "083ea866a75dbb57350829e59349d70ea2798b6e6571c1d58e32fe1b7a9ee163"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT latest_round FROM latest_state WHERE currencyid = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "latest_round",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e4680d6ba80c7b778a6582c87ff14f6feece7b9d6e2a13c8bb0225d31144ca00"
+}

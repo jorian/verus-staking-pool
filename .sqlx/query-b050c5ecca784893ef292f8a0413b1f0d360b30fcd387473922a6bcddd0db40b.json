@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE stakes SET status = 'processed', result = $1 WHERE currencyid = $2 AND blockhash = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b050c5ecca784893ef292f8a0413b1f0d360b30fcd387473922a6bcddd0db40b"
+}

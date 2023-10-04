@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO stakes(currencyid, blockhash, amount, mined_by, pos_source_txid, pos_source_vout_num, pos_source_amount, blockheight, status)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Int2",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7dcb1ca4e3287c0025b66d0d8c7de4c04b765f931f91f59c9395855f416449c4"
+}

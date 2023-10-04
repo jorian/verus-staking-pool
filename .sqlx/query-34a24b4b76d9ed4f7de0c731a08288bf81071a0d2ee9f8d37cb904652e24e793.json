@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT txid FROM transactions",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "txid",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "34a24b4b76d9ed4f7de0c731a08288bf81071a0d2ee9f8d37cb904652e24e793"
+}

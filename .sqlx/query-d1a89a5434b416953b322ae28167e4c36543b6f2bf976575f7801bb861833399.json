@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT identityaddress, SUM(reward) as sum\n        FROM payout_members \n        WHERE identityaddress = $1\n            AND currencyid = $2\n        GROUP BY identityaddress",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "identityaddress",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "sum",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "d1a89a5434b416953b322ae28167e4c36543b6f2bf976575f7801bb861833399"
+}
