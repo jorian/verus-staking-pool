@@ -25,11 +25,11 @@ use tokio::sync::{
 use tracing::{debug, error, info, instrument, trace, warn};
 use vrsc_rpc::{
     bitcoin::BlockHash,
+    client::RpcApi,
     json::{
         identity::{Identity, IdentityPrimary},
         vrsc::{Address, Amount, SignedAmount},
     },
-    RpcApi,
 };
 
 use crate::{

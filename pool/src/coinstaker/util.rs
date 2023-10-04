@@ -7,11 +7,11 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, trace};
 use vrsc_rpc::{
+    client::{Client, RpcApi},
     json::{
         vrsc::{Address, Amount},
         Block, TransactionVout, ValidationType,
     },
-    Client, RpcApi,
 };
 
 use crate::payoutmanager::{PayoutManager, PayoutManagerError};
@@ -409,7 +409,7 @@ pub async fn add_work(
 #[instrument(skip(pool, client, pool_identity_address, nats_client))]
 pub async fn process_payments(
     pool: &PgPool,
-    client: &Client,
+    client: &vrsc_rpc::client::Client,
     nats_client: &async_nats::Client,
     currencyid: &Address,
     pool_identity_address: &Address,

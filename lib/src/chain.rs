@@ -1,7 +1,8 @@
 use std::fmt::Display;
 
 use color_eyre::Report;
-use vrsc_rpc::{json::vrsc::Address, Auth, Client};
+use vrsc_rpc::Auth;
+use vrsc_rpc::{client::Client, json::vrsc::Address};
 
 use crate::configuration::get_coin_configuration;
 
@@ -20,7 +21,7 @@ pub struct Chain {
 }
 
 impl Chain {
-    pub fn verusd_client(&self) -> Result<vrsc_rpc::Client, Report> {
+    pub fn verusd_client(&self) -> Result<Client, Report> {
         match self.name.as_ref() {
             "vrsctest" | "VRSC" => Client::vrsc(
                 self.testnet,

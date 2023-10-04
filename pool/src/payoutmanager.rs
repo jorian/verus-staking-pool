@@ -7,8 +7,8 @@ use rust_decimal::Decimal;
 use tracing::{debug, error, trace};
 use vrsc_rpc::{
     bitcoin::Txid,
+    client::{Client, RpcApi, SendCurrencyOutput},
     json::vrsc::{Address, Amount},
-    Client, RpcApi, SendCurrencyOutput,
 };
 
 #[derive(Debug)]

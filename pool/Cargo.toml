@@ -26,8 +26,8 @@ tracing-subscriber = { version = "0.3.5", features = [
     "json",
 ] }
 tracing-bunyan-formatter = "0.3.3"
-# vrsc-rpc = { version = "0.1.10" }
-vrsc-rpc = { path = "../../rust-vrsc-rpc/client" }
+vrsc-rpc = { version = "0.1.15" }
+# vrsc-rpc = { path = "../../rust-vrsc-rpc/client" }
 config = { version = "0.13", default-features = false, features = ["toml"] }
 serde-aux = "4.0.0"
 secrecy = { version = "0.8", features = ["serde"] }
