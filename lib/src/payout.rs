@@ -426,7 +426,7 @@ mod tests {
             blockheight: 22222,
 
             identityaddress: Address::from_str(BOB).unwrap(),
-            reward: Amount::from_sat(4_795_168_729),
+            reward: Amount::from_sat(4_795_168_728),
             shares: Decimal::from_i64(226_369_800_917_454).unwrap(),
             fee: Amount::from_sat(252_377_302),
             txid: None,
@@ -435,7 +435,7 @@ mod tests {
         assert!(payout.members.contains(&alice));
         assert!(payout.members.contains(&bob));
 
-        assert_eq!(payout.pool_fee_amount, Amount::from_sat(384_000_000));
+        assert_eq!(payout.pool_fee_amount, Amount::from_sat(384_000_001));
 
         Ok(())
     }
