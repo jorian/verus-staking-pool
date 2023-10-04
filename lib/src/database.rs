@@ -802,10 +802,9 @@ pub async fn get_pool_fees(pool: &PgPool, currencyid: &str) -> Result<Amount, Re
 
 #[cfg(test)]
 mod tests {
-    use std::ops::SubAssign;
 
     use rust_decimal::prelude::FromPrimitive;
-    use sqlx::{types::chrono, Row};
+    use sqlx::Row;
 
     use super::*;
     use tracing_test::traced_test;
