@@ -96,6 +96,7 @@ pub struct CoinConfig {
     pub rpc_password: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub rpc_port: u16,
+    pub rpc_host: String,
     #[serde(default)]
     pub verus_vault_conditions: VerusVaultConditions,
 }
@@ -112,6 +113,7 @@ impl From<&CoinConfig> for Chain {
             default_min_payout: coin_config.default_min_payout,
             rpc_user: coin_config.rpc_user.clone(),
             rpc_password: coin_config.rpc_password.clone(),
+            rpc_host: coin_config.rpc_host.clone(),
             rpc_port: coin_config.rpc_port,
         }
     }

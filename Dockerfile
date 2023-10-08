@@ -13,7 +13,7 @@ COPY . .
 ENV SQLX_OFFLINE true
 RUN cargo build --release --bin pool
 
-FROM rust:1.72.1-slim AS runtime
+FROM rust:1.72.1 AS runtime
 WORKDIR /workspace
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates \

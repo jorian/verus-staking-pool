@@ -16,6 +16,12 @@ use vrsc_rpc::{
     json::vrsc::{Address, Amount},
 };
 
+pub async fn migrate(pool: &PgPool) -> Result<(), Report> {
+    sqlx::migrate!("../migrations").run(pool).await?;
+
+    Ok(())
+}
+
 #[allow(unused)]
 pub async fn insert_subscriber(
     pool: &PgPool,

@@ -1,0 +1,34 @@
+version: '3.8'
+
+networks:
+  app-network:
+    driver: bridge
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB} 
+    ports: 
+      - 127.0.0.1:5432:5432
+    networks:
+      - app-network
+  nats:
+    image: nats:latest
+    restart: always
+    ports: 
+      - 4222:4222
+    networks:
+      - app-network
+  app: 
+    image: verus-staking-pool
+    build: .
+    depends_on:
+      - nats
+      - db
+    networks:
+      - app-network
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"

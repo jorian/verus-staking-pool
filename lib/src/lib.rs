@@ -1,15 +1,17 @@
 use std::{convert::Infallible, str::FromStr};
 
 use color_eyre::Report;
-pub use rmp_serde::{Deserializer, Serializer};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-pub use sqlx::PgPool;
 use vrsc_rpc::{
     bitcoin::{BlockHash, Txid},
     json::vrsc::{util::amount::serde::as_sat, Address, Amount},
     jsonrpc::serde_json,
 };
+
+pub use database::migrate;
+pub use rmp_serde::{Deserializer, Serializer};
+pub use sqlx::{migrate, PgPool};
 
 pub mod chain;
 pub mod configuration;

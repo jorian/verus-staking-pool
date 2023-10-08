@@ -14,6 +14,7 @@ pub struct Chain {
     pub currencyidhex: String,
     pub rpc_user: String,
     pub rpc_password: String,
+    pub rpc_host: String,
     pub rpc_port: u16,
     pub default_pool_fee: f32,   // in basis points (5% = 0.05)
     pub default_tx_fee: u32,     // in basis points (5% = 0.05)
@@ -26,7 +27,7 @@ impl Chain {
             "vrsctest" | "VRSC" => Client::vrsc(
                 self.testnet,
                 Auth::UserPass(
-                    format!("http://127.0.0.1:{}", self.rpc_port),
+                    format!("{}:{}", self.rpc_host, self.rpc_port),
                     self.rpc_user.clone(),
                     self.rpc_password.clone(),
                 ),
@@ -36,7 +37,7 @@ impl Chain {
                 self.testnet,
                 &self.currencyidhex,
                 Auth::UserPass(
-                    format!("http://127.0.0.1:{}", self.rpc_port),
+                    format!("{}:{}", self.rpc_host, self.rpc_port),
                     self.rpc_user.clone(),
                     self.rpc_password.clone(),
                 ),
