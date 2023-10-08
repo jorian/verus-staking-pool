@@ -56,15 +56,12 @@ impl TryFrom<&str> for Chain {
     type Error = ChainError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        if let Ok(res) = get_coin_configuration(value) {
-            if let Some(config) = res {
-                let chain = Chain::from(&config);
-                return Ok(chain);
-            } else {
-                return Err(ChainError::NotFound.into());
-            }
+        if let Ok(Some(config)) = get_coin_configuration(value) {
+            let chain = Chain::from(&config);
+
+            Ok(chain)
         } else {
-            return Err(ChainError::NotFound.into());
+            Err(ChainError::NotFound)
         }
     }
 }

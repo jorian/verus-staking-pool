@@ -16,7 +16,6 @@ zmq = { version = "0.10.0" }
 rand = "0.8.5"
 rmp-serde = "1.1"
 poollib = { path = "../lib" }
-rmpv = "1"
 color-eyre = "0.6.1"
 futures = "0.3.26"
 tracing = "0.1.26"
@@ -27,13 +26,11 @@ tracing-subscriber = { version = "0.3.5", features = [
 ] }
 tracing-bunyan-formatter = "0.3.3"
 vrsc-rpc = { version = "0.1.15" }
-# vrsc-rpc = { path = "../../rust-vrsc-rpc/client" }
 config = { version = "0.13", default-features = false, features = ["toml"] }
 serde-aux = "4.0.0"
 secrecy = { version = "0.8", features = ["serde"] }
-async-nats = "0.29.0"
+async-nats = "0.32.1"
 serde_json = "1"
-tracing-test = "0.2.4"
 tracing-appender = "0.2.2"
 chrono = { version = "0.4", features = ["clock"] }
 
@@ -49,4 +46,6 @@ chrono = { version = "0.4", features = ["clock"] }
 #     "http-proto",
 # ] }
 # opentelemetry-semantic-conventions = "0.9.0"
-tokio-graceful-shutdown = "0.13.0"
+
+[dev-dependencies]
+tracing-test = "0.2.4"

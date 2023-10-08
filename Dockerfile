@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef:latest-rust-1.72.0 as chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.72.1 as chef
 WORKDIR /workspace
 RUN apt update && apt install lld clang -y
 
@@ -13,7 +13,7 @@ COPY . .
 ENV SQLX_OFFLINE true
 RUN cargo build --release --bin pool
 
-FROM debian:bullseye-slim AS runtime
+FROM rust:1.72.1-slim AS runtime
 WORKDIR /workspace
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates \
@@ -21,6 +21,8 @@ RUN apt-get update -y \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
+COPY config config
+COPY coin_config coin_config
 COPY --from=builder /workspace/target/release/pool pool
 
 ENTRYPOINT ["./pool"]

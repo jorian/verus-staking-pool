@@ -48,7 +48,7 @@ impl PayoutManager {
     ) -> Result<Payout, Report> {
         // need to gather the work that belongs to this blockheight in order to do the calculation
         let work = database::get_work_and_fee_by_round(
-            &pool,
+            pool,
             &stake.currencyid.to_string(),
             stake.blockheight,
         )
@@ -56,7 +56,7 @@ impl PayoutManager {
 
         debug!("{:#?}", &work);
 
-        let payout = Payout::new(&stake, pool_fee_discount, work, pool_identity_address);
+        let payout = Payout::new(stake, pool_fee_discount, work, pool_identity_address);
 
         debug!("{:#?}", payout);
 
@@ -97,7 +97,7 @@ impl PayoutManager {
             // TODO this could be done as one query, of course
             let subscribers = database::get_subscribers(
                 pool,
-                &currencyid,
+                currencyid,
                 &payout_members_map
                     .keys()
                     .map(|address| address.to_string())
@@ -125,7 +125,7 @@ impl PayoutManager {
                 }
             }
 
-            if payout_members_map.len() > 0 {
+            if !payout_members_map.is_empty() {
                 return Ok(Some(payout_members_map));
             }
         }
@@ -166,7 +166,7 @@ impl PayoutManager {
         debug!("outputs to send: {:#?}", &outputs);
         let opid = client.send_currency(&pool_address.to_string(), outputs, None, None)?;
 
-        if let Some(txid) = wait_for_sendcurrency_finish(&client, &opid).await? {
+        if let Some(txid) = wait_for_sendcurrency_finish(client, &opid).await? {
             trace!("{txid}");
 
             return Ok(Some(txid));
@@ -183,7 +183,7 @@ async fn wait_for_sendcurrency_finish(client: &Client, opid: &str) -> Result<Opt
     // we should return when status is one of failed or success.
     loop {
         trace!("getting operation status: {}", &opid);
-        let operation_status = client.z_get_operation_status(vec![&opid])?;
+        let operation_status = client.z_get_operation_status(vec![opid])?;
         trace!("got operation status: {:?}", &operation_status);
 
         if let Some(Some(opstatus)) = operation_status.first() {

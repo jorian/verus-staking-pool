@@ -29,7 +29,7 @@ pub async fn check_for_maturity(
         pending_stakes.len()
     );
 
-    for stake in pending_stakes.into_iter() {
+    for stake in pending_stakes.iter_mut() {
         trace!(
             "check maturity for {}:{}",
             stake.blockhash,
@@ -102,7 +102,7 @@ pub async fn check_for_stake(
             if let Some(postxddest) = block.postxddest.as_ref() {
                 debug!("{:#?}", postxddest);
                 if let Some(subscriber) = active_subscribers.iter().find(|sub| {
-                    &sub.identity_address == postxddest && &sub.currencyid == &cs.chain.currencyid
+                    &sub.identity_address == postxddest && sub.currencyid == cs.chain.currencyid
                 }) {
                     trace!(
                         "block {} was mined by a subscriber: {postxddest}",
@@ -139,9 +139,9 @@ pub async fn check_for_stake(
 
                         let stake = Stake::new(
                             cs.chain.currencyid.clone(),
-                            block.hash.clone(),
+                            block.hash,
                             postxddest.clone(),
-                            block.possourcetxid.unwrap().clone(),
+                            block.possourcetxid.unwrap(),
                             pos_source_vout_num,
                             pos_source_amount,
                             StakeResult::Pending,
@@ -246,7 +246,7 @@ pub async fn check_subscription(
                 "subscribed" => {
                     trace!("is a subscriber already");
                     if cs.identity_is_eligible(&identity.identity, &subscriber) {
-                        return Ok(SubscriptionStatus::Active);
+                        Ok(SubscriptionStatus::Active)
                     } else {
                         database::update_subscriber_status(
                             &cs.pool,
@@ -272,7 +272,7 @@ pub async fn check_subscription(
                             )
                             .await?;
 
-                        return Ok(SubscriptionStatus::Unsubscribed);
+                        Ok(SubscriptionStatus::Unsubscribed)
                     }
                 }
                 "pending" => {
@@ -302,29 +302,29 @@ pub async fn check_subscription(
                             )
                             .await?;
 
-                        return Ok(SubscriptionStatus::Active);
+                        Ok(SubscriptionStatus::Active)
                     } else {
                         trace!(
                             "a pending subscriber changed its ID but did not meet the requirements: {:#?}",
                             &identity.identity
                         );
 
-                        return Ok(SubscriptionStatus::Pending);
+                        Ok(SubscriptionStatus::Pending)
                     }
                 }
                 "unsubscribed" => {
                     // TODO can an unsubscribed user automatically resubscribe when the identity is updated, thereby making
                     // the subscription eligible again?
 
-                    return Ok(SubscriptionStatus::Unsubscribed);
+                    Ok(SubscriptionStatus::Unsubscribed)
                 }
                 _ => unreachable!(), // a subscription has 3 statuses in the db.
             }
         } else {
-            return Ok(SubscriptionStatus::NotFound);
+            Ok(SubscriptionStatus::NotFound)
         }
     } else {
-        return Ok(SubscriptionStatus::NotFound);
+        Ok(SubscriptionStatus::NotFound)
     }
 }
 
@@ -374,22 +374,19 @@ pub async fn add_work(
                 acc
             });
 
-        pending_stakes
-            .iter()
-            .inspect(|stake| trace!("{}", stake.blockheight))
-            .for_each(|stake| {
-                if payload.contains_key(&stake.mined_by) {
-                    trace!("adding work to staker to undo stake punishment");
-                    payload.entry(stake.mined_by.clone()).and_modify(|v| {
-                        debug!(
-                            "pos_source_amount: {}",
-                            stake.pos_source_amount.as_sat() as i64
-                        );
-                        debug!("sum: {}", v);
-                        *v += Decimal::from_i64(stake.pos_source_amount.as_sat() as i64).unwrap()
-                    });
-                }
-            });
+        pending_stakes.iter().for_each(|stake| {
+            if payload.contains_key(&stake.mined_by) {
+                trace!("adding work to staker to undo stake punishment");
+                payload.entry(stake.mined_by.clone()).and_modify(|v| {
+                    debug!(
+                        "pos_source_amount: {}",
+                        stake.pos_source_amount.as_sat() as i64
+                    );
+                    debug!("sum: {}", v);
+                    *v += Decimal::from_i64(stake.pos_source_amount.as_sat() as i64).unwrap()
+                });
+            }
+        });
 
         if !payload.is_empty() {
             debug!("payload to insert: {:#?}", &payload);
@@ -417,7 +414,7 @@ pub async fn process_payments(
     info!("process pending payments");
 
     if let Some(eligible) =
-        PayoutManager::get_eligible_for_payout(&pool, &currencyid.to_string()).await?
+        PayoutManager::get_eligible_for_payout(pool, &currencyid.to_string()).await?
     {
         let outputs = PayoutManager::prepare_payment(&eligible)?;
         debug!("outputs: {outputs:#?}");
@@ -428,10 +425,10 @@ pub async fn process_payments(
             .fold(Amount::ZERO, |acc, sum| acc + sum.amount);
 
         if let Some(txid) =
-            PayoutManager::send_payment(outputs, &pool_identity_address, &client).await?
+            PayoutManager::send_payment(outputs, pool_identity_address, client).await?
         {
             if let Err(e) = database::update_payment_members(
-                &pool,
+                pool,
                 &currencyid.to_string(),
                 eligible.values().flatten(),
                 &txid.to_string(),

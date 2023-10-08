@@ -283,7 +283,7 @@ pub async fn get_stake(
     .await?;
 
     if let Some(row) = opt_row {
-        return Ok(Some(Stake::new(
+        Ok(Some(Stake::new(
             Address::from_str(&row.currencyid).unwrap(),
             BlockHash::from_str(&row.blockhash).unwrap(),
             Address::from_str(&row.mined_by).unwrap(),
@@ -293,9 +293,9 @@ pub async fn get_stake(
             StakeResult::from_str(&row.result.unwrap_or(String::new())).unwrap(),
             Amount::from_sat(row.amount.try_into().unwrap()),
             row.blockheight as u64,
-        )));
+        )))
     } else {
-        return Ok(None);
+        Ok(None)
     }
 }
 

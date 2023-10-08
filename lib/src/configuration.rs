@@ -16,7 +16,7 @@ pub fn get_coin_configuration(name: &str) -> Result<Option<CoinConfig>, Report> 
 
     if let Ok(config) = config::Config::builder()
         .add_source(config::File::from(
-            config_dir.join(&name.to_ascii_lowercase()),
+            config_dir.join(name.to_ascii_lowercase()),
         ))
         .build()?
         .try_deserialize::<CoinConfig>()

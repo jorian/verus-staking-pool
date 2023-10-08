@@ -58,7 +58,7 @@ impl CoinStaker {
         cs_tx: mpsc::Sender<CoinStakerMessage>,
     ) -> Self {
         debug!("coin_config: {:?}", &coin_config);
-        let nats_client = async_nats::connect("nats://localhost:4222".to_string())
+        let nats_client = async_nats::connect("nats://nats:4222".to_string())
             .await
             .expect("a nats client");
         let pool_identity_address = coin_config.pool_identity_address.clone();
@@ -286,8 +286,7 @@ async fn listen(cs: &mut CoinStaker) -> Result<(), Report> {
                                 99999999,
                             ) {
                                 // identities need a 150 block cooldown if they were updated, before they can stake
-                                identity.blockheight
-                                    < block.height.checked_sub(150).unwrap_or(0) as i64
+                                identity.blockheight < block.height.saturating_sub(150) as i64
                             } else {
                                 false
                             }
@@ -405,7 +404,7 @@ async fn listen(cs: &mut CoinStaker) -> Result<(), Report> {
                 let pool_supply = wallet_info.eligible_staking_balance.as_vrsc();
                 let mining_info = client.get_mining_info()?;
                 let network_supply = mining_info.stakingsupply;
-                let my_supply = if identities.len() > 0 {
+                let my_supply = if !identities.is_empty() {
                     let mut subscriptions = database::get_subscriptions(
                         &cs.pool,
                         &cs.chain.currencyid.to_string(),
@@ -427,8 +426,7 @@ async fn listen(cs: &mut CoinStaker) -> Result<(), Report> {
                                 let block =
                                     client.get_block_by_height(mining_info.blocks, 2).unwrap();
 
-                                identity.blockheight
-                                    < block.height.checked_sub(150).unwrap_or(0) as i64
+                                identity.blockheight < block.height.saturating_sub(150) as i64
                             } else {
                                 false
                             };
@@ -482,7 +480,7 @@ async fn listen(cs: &mut CoinStaker) -> Result<(), Report> {
                 }
             }
             CoinStakerMessage::CheckSubscription(os_tx, s_id) => {
-                let status = util::check_subscription(&cs, &s_id).await?;
+                let status = util::check_subscription(cs, &s_id).await?;
                 os_tx
                     .send(json!({
                         "result": "success",
@@ -611,8 +609,7 @@ async fn listen(cs: &mut CoinStaker) -> Result<(), Report> {
                                 os_tx
                                     .send(Err(CoinStakerError::SubscriberAlreadyExists(
                                         existing_subscriber.identity_name.clone(),
-                                    )
-                                    .into()))
+                                    )))
                                     .unwrap();
                             }
                         } else {
@@ -642,8 +639,7 @@ async fn listen(cs: &mut CoinStaker) -> Result<(), Report> {
                         os_tx
                             .send(Err(CoinStakerError::IdentityNotValid(
                                 identitystr.to_string(),
-                            )
-                            .into()))
+                            )))
                             .unwrap();
                     }
                 }
@@ -700,7 +696,7 @@ async fn listen(cs: &mut CoinStaker) -> Result<(), Report> {
                         )
                         .await?;
 
-                        check_subscription(&cs, &address.to_string()).await?;
+                        check_subscription(cs, &address.to_string()).await?;
                     };
                 }
             }
