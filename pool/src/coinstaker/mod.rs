@@ -58,7 +58,7 @@ impl CoinStaker {
         cs_tx: mpsc::Sender<CoinStakerMessage>,
     ) -> Self {
         debug!("coin_config: {:?}", &coin_config);
-        let nats_client = async_nats::connect("nats://nats:4222".to_string())
+        let nats_client = async_nats::connect("nats://127.0.0.1:4222".to_string())
             .await
             .expect("a nats client");
         let pool_identity_address = coin_config.pool_identity_address.clone();
@@ -124,8 +124,8 @@ impl CoinStaker {
 
 #[instrument(level = "trace", skip(cs), fields(chain = cs.chain.name))]
 pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
+    // first check if daemon is running. if not, abort immediately
     if cs.ping_daemon().is_ok() {
-        // first check if daemon is running. if not, abort immediately
         let client = cs.chain.verusd_client()?;
 
         // if daemon is not staking, the work will not be counted towards shares
@@ -151,8 +151,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
         info!("starting to listen for messages on {}", cs.chain);
 
-        // don't do startup sequence when no latest round is found
-        //
         // in the period between the latest blockheight and the current blockheight, subscribers may have left.
         if let Some(mut latest_blockheight) =
             database::get_latest_round(&cs.pool, &cs.chain.currencyid.to_string()).await?
@@ -171,11 +169,13 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
                     }
                 }
             }
+        } else {
+            info!("cold start, not checking subscriptions");
         }
 
         let mut maturing_stakes =
             database::get_pending_stakes(&cs.pool, &cs.chain.currencyid.to_string()).await?;
-        debug!("pending stakes {:#?}", maturing_stakes);
+        debug!("no. of pending stakes {:#?}", maturing_stakes.len());
 
         let c_tx = cs.get_mpsc_sender();
 
@@ -189,6 +189,7 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
             let pool_identity_address = cs.pool_identity_address.clone();
             let nats_client = cs.nats_client.clone();
             let payout_interval = std::time::Duration::from_secs(cs.config.payout_interval);
+
             async move {
                 let mut interval = tokio::time::interval(payout_interval);
 
@@ -212,11 +213,6 @@ pub async fn run(mut cs: CoinStaker) -> Result<(), Report> {
 
         // The loop that listens for mpsc messages
         listen(&mut cs).await?;
-        // if let Err(e) = listen(&mut cs).await {
-        //     cs.
-        // }
-        warn!("no more coinstaker message receiver running, stopping staking");
-        cs.chain.verusd_client()?.set_generate(false, 0)?;
     } else {
         error!("{} daemon is not running", cs.chain.name);
     }

@@ -7,8 +7,9 @@ use futures::{future::join_all, stream::FuturesUnordered};
 
 use poollib::{configuration::get_coin_configurations, PgPool};
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, trace, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use vrsc_rpc::client::RpcApi;
 
 pub mod coinstaker;
 mod configuration;
@@ -53,8 +54,8 @@ impl Controller {
             let coin_staker =
                 CoinStaker::new(pool.clone(), coin_config, cs_rx, cs_tx.clone()).await;
 
-            let name = coin_staker.chain.currencyid.clone();
-            self.senders.insert(name.to_string().clone(), cs_tx.clone());
+            let name = coin_staker.chain.currencyid.to_string();
+            self.senders.insert(name.clone(), cs_tx.clone());
 
             handles.push(tokio::spawn(async move {
                 if let Err(e) = coinstaker::run(coin_staker).await {
@@ -87,6 +88,7 @@ fn logging_setup() {
         .unwrap();
 
     let file_appender = tracing_appender::rolling::hourly("./logs", "trace");
+    let error_appender = tracing_appender::rolling::hourly("./error-logs", "error");
     // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::registry()
@@ -96,7 +98,8 @@ fn logging_setup() {
             fmt::Layer::new()
                 // .json()
                 // .with_ansi(false)
-                .with_writer(file_appender.with_max_level(Level::TRACE)),
+                .with_writer(file_appender.with_max_level(Level::TRACE))
+                .with_writer(error_appender.with_max_level(Level::ERROR)),
         )
         .try_init()
         .expect("tracing");
