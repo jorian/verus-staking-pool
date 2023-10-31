@@ -1,0 +1,16 @@
+name = "VRSC"
+currencyid = "i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV"
+currencyidhex = "4c6c9b5a9f7f31d8ea604cb49ad3645c01b8f51a"
+testnet = false
+
+pool_fee_discount = 0.0
+pool_identity_address = "<pool i-address>"
+default_pool_fee = 0.01
+default_min_payout = 600000000
+default_tx_fee = 10000
+payout_interval = 1800
+
+rpc_password = "<rpcpassword>"
+rpc_port = <rpcport>
+rpc_user = "<rpcuser>"
+zmq_port_blocknotify = 48777

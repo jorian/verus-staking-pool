@@ -7,9 +7,8 @@ use futures::{future::join_all, stream::FuturesUnordered};
 
 use poollib::{configuration::get_coin_configurations, PgPool};
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, trace, warn, Level};
+use tracing::{debug, error, info, trace, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-use vrsc_rpc::client::RpcApi;
 
 pub mod coinstaker;
 mod configuration;

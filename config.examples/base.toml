@@ -3,6 +3,7 @@ enable_tracing = true
 trace_level = "debug"
 
 [database]
-host = "127.0.0.1"
-port = 5432
-username = "postgres"
+host = <db host>
+port = <db port>
+username = <db user>
+password = "<db password>"

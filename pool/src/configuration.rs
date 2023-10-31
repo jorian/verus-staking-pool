@@ -71,7 +71,7 @@ impl DbConfig {
 pub enum Environment {
     Local,
     Development,
-    Test,
+    Staging,
     Production,
 }
 
@@ -80,7 +80,7 @@ impl Environment {
         match self {
             Environment::Local => "local",
             Environment::Development => "development",
-            Environment::Test => "test",
+            Environment::Staging => "staging",
             Environment::Production => "production",
         }
     }
@@ -92,7 +92,7 @@ impl TryFrom<String> for Environment {
         match s.to_lowercase().as_str() {
             "local" => Ok(Self::Local),
             "development" => Ok(Self::Development),
-            "test" => Ok(Self::Test),
+            "staging" => Ok(Self::Staging),
             "production" => Ok(Self::Production),
             other => Err(format!("{} is not a valid environment", other)),
         }
