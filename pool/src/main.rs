@@ -42,6 +42,8 @@ impl Controller {
         let pg_url = config.database.connection_string();
         let pool = PgPool::connect_lazy(&pg_url).expect("a database pool");
 
+        dbg!(&pg_url);
+
         poollib::migrate(&pool).await?;
 
         let coin_configs = get_coin_configurations()?;

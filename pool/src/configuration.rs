@@ -41,7 +41,7 @@ pub struct DbConfig {
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
     pub host: String,
-    pub database_name: String,
+    pub name: String,
 }
 
 impl DbConfig {
@@ -52,7 +52,7 @@ impl DbConfig {
             self.password.expose_secret(),
             self.host,
             self.port,
-            self.database_name
+            self.name
         )
     }
 

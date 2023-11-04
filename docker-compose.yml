@@ -1,8 +1,8 @@
 version: '3.8'
 
-networks:
-  app-network:
-    driver: bridge
+# networks:
+#   app-network:
+#     driver: bridge
 
 services:
   db:
@@ -12,23 +12,34 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB} 
     ports: 
-      - 127.0.0.1:5432:5432
-    networks:
-      - app-network
+      - 5432:5432
+    # networks:
+    #   - app-network
+    volumes: 
+      - dbdata:/var/lib/postgresql/data
+      
   nats:
     image: nats:latest
     restart: always
     ports: 
       - 4222:4222
-    networks:
-      - app-network
+    # networks:
+    #   - app-network
+
   app: 
     image: verus-staking-pool
     build: .
     depends_on:
       - nats
       - db
-    networks:
-      - app-network
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
+    # networks:
+    #   - app-network
+    restart: always
+    environment:
+      APP_DATABASE__NAME: ${POSTGRES_DB}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  dbdata:
+    name: "${POSTGRES_DB}"
