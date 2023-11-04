@@ -58,7 +58,7 @@ impl CoinStaker {
         cs_tx: mpsc::Sender<CoinStakerMessage>,
     ) -> Self {
         debug!("coin_config: {:?}", &coin_config);
-        let nats_client = async_nats::connect("nats://127.0.0.1:4222".to_string())
+        let nats_client = async_nats::connect("nats://nats:4222".to_string())
             .await
             .expect("a nats client");
         let pool_identity_address = coin_config.pool_identity_address.clone();

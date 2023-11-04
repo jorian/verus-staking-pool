@@ -20,7 +20,7 @@ services:
       
   nats:
     image: nats:latest
-    restart: always
+    restart: on-failure
     ports: 
       - 4222:4222
     # networks:
