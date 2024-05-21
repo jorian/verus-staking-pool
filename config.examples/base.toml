@@ -1,9 +1,0 @@
-[application]
-enable_tracing = true
-trace_level = "debug"
-
-[database]
-host = <db host>
-port = <db port>
-username = <db user>
-password = "<db password>"

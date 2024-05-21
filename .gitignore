@@ -1,6 +1,5 @@
-/coin_config
-/config
-/logs
 /target
-/.vscode
 .env
+/coin_configs/*.toml
+/config/*.json
+/bin

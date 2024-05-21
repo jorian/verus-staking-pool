@@ -5,47 +5,57 @@ authors.workspace = true
 description.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "verus-staking-pool"
+path = "src/bin/main.rs"
+
+[features]
+mock = []
 
 [dependencies]
-rust_decimal = "1.28.1"
+anyhow = "1.0.82"
+config = { version = "0.14.0", default-features = false, features = [
+    "json",
+    "toml",
+] }
+reqwest = "0.12.4"
+rust_decimal = "1.35.0"
+secrecy = { version = "0.8", features = ["serde"] }
+url = { version = "2.5.0", features = ["serde"] }
+uuid = { version = "1.8.0", features = ["v4"] }
+vrsc-rpc = { path = "../../rust-vrsc-rpc/client" }
+futures-util = "0.3.30"
+
+axum = { version = "0.7.5", features = ["tracing", "macros"] }
+axum-extra = { version = "0.9.3", features = ["query"] }
+tower-http = { version = "0.5.2", features = ["trace", "catch-panic"] }
+
+tokio = { features = ["rt", "macros", "rt-multi-thread"], version = "1.37.0" }
+tokio-graceful-shutdown = "0.15.0"
+
+tmq = { version = "0.4.0" }
+zmq = { version = "0.10.0" }
+
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
-tokio = { version = "1.25.0", features = ["full"] }
-tmq = { version = "0.3.2" }
-zmq = { version = "0.10.0" }
-rand = "0.8.5"
-rmp-serde = "1.1"
-poollib = { path = "../lib" }
-color-eyre = "0.6.1"
-futures = "0.3.26"
-tracing = "0.1.26"
-tracing-subscriber = { version = "0.3.5", features = [
-    "env-filter",
-    "std",
-    "json",
-] }
-tracing-bunyan-formatter = "0.3.3"
-vrsc-rpc = { version = "0.1.15" }
-config = { version = "0.13", default-features = false, features = ["toml"] }
-serde-aux = "4.0.0"
-secrecy = { version = "0.8", features = ["serde"] }
-async-nats = "0.32.1"
 serde_json = "1"
-tracing-appender = "0.2.2"
-chrono = { version = "0.4", features = ["clock"] }
+serde-aux = "4.0.0"
 
-# opentelemetry-prometheus = "0.12.0"
-# opentelemetry = { version = "0.18.0", default-features = false, features = [
-#     "trace",
-#     "rt-tokio",
-# ] }
-# tracing-opentelemetry = "0.18.0"
-# opentelemetry-otlp = { version = "0.11.0", features = [
-#     "reqwest-client",
-#     "reqwest-rustls",
-#     "http-proto",
-# ] }
-# opentelemetry-semantic-conventions = "0.9.0"
 
-[dev-dependencies]
-tracing-test = "0.2.4"
+poollib = { path = "../lib" }
+
+[dependencies.sqlx]
+default-features = false
+features = [
+    "postgres",
+    "macros",
+    "rust_decimal",
+    "migrate",
+    "uuid",
+    "chrono",
+    "runtime-tokio-rustls",
+]
+version = "0.7.4"

@@ -1,9 +1,0 @@
-#!/bin/bash
-
-# This script can be put in a crontab to periodically check the uptime of the pool software. 
-# You might want to stop staking when the Verus daemon has crashed, for example.
-
-# (Requires NATS cli to be installed: https://docs.nats.io/using-nats/nats-tools/nats_cli/)
-
-x=`nats request "ipc.iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq" '{"command":"heartbeat","data":"null"}' 2> /dev/null`
-echo $x # {alive: true}

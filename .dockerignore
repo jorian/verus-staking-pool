@@ -1,5 +1,0 @@
-.env
-.gitignore
-target/
-Dockerfile
-logs/
