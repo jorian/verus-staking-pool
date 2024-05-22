@@ -73,8 +73,8 @@ impl From<&Address> for IdentityAddress {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stake {
     pub currency_address: Address,
-    pub blockhash: BlockHash,
-    pub blockheight: u64,
+    pub block_hash: BlockHash,
+    pub block_height: u64,
     pub found_by: Address,
     pub source_txid: Txid,
     pub source_vout_num: u16,
@@ -88,8 +88,8 @@ pub struct Stake {
 impl Stake {
     pub fn new(
         currency_address: &Address,
-        blockhash: &BlockHash,
-        blockheight: u64,
+        block_hash: &BlockHash,
+        block_height: u64,
         found_by: &Address,
         source_txid: Txid,
         source_vout_num: u16,
@@ -99,8 +99,8 @@ impl Stake {
     ) -> Self {
         Self {
             currency_address: currency_address.clone(),
-            blockhash: blockhash.clone(),
-            blockheight,
+            block_hash: block_hash.clone(),
+            block_height,
             found_by: found_by.clone(),
             source_txid,
             source_vout_num,
@@ -111,14 +111,16 @@ impl Stake {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "stake_status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StakeStatus {
-    Mature,
+    Maturing,
+    Matured,
     Stale,
-    Stolen,
-    Pending,
+    StakeGuard,
 }
 
+#[allow(unused)]
 fn block() -> Block {
     let block = Block {
         hash: todo!(),

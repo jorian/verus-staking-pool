@@ -1,8 +1,14 @@
 use std::str::FromStr;
 
-use vrsc_rpc::json::vrsc::{Address, Amount};
+use vrsc_rpc::{
+    bitcoin::{BlockHash, Txid},
+    json::vrsc::{Address, Amount},
+};
 
-use crate::coinstaker::{constants::Staker, StakerStatus};
+use crate::coinstaker::{
+    constants::{Stake, StakeStatus, Staker},
+    StakerStatus,
+};
 
 pub struct DbStaker {
     pub(super) currency_address: String,
@@ -27,5 +33,41 @@ impl TryFrom<DbStaker> for Staker {
         };
 
         Ok(staker)
+    }
+}
+
+pub struct DbStake {
+    pub(super) currency_address: String,
+    pub(super) block_hash: String,
+    pub(super) block_height: i64,
+    pub(super) amount: i64,
+    pub(super) found_by: String,
+    pub(super) source_txid: String,
+    pub(super) source_vout_num: i32,
+    pub(super) source_amount: i64,
+    pub(super) status: StakeStatus,
+}
+
+impl TryFrom<DbStake> for Stake {
+    type Error = sqlx::Error;
+
+    fn try_from(value: DbStake) -> Result<Self, Self::Error> {
+        let stake = Self {
+            currency_address: Address::from_str(&value.currency_address)
+                .map_err(|e| sqlx::Error::Decode(e.into()))?,
+            block_hash: BlockHash::from_str(&value.block_hash)
+                .map_err(|e| sqlx::Error::Decode(e.into()))?,
+            block_height: value.block_height as u64,
+            found_by: Address::from_str(&value.found_by)
+                .map_err(|e| sqlx::Error::Decode(e.into()))?,
+            source_txid: Txid::from_str(&value.source_txid)
+                .map_err(|e| sqlx::Error::Decode(e.into()))?,
+            source_vout_num: value.source_vout_num as u16,
+            source_amount: Amount::from_sat(value.source_amount as u64),
+            status: value.status,
+            amount: Amount::from_sat(value.amount as u64),
+        };
+
+        Ok(stake)
     }
 }

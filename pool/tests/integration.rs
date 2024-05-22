@@ -1,6 +1,9 @@
+#[cfg(feature = "mock")]
 use std::net::{IpAddr, Ipv4Addr};
 
+#[cfg(feature = "mock")]
 use pool::config::{AppConfig, Config, DbConfig, HttpConfig};
+#[cfg(feature = "mock")]
 use secrecy::Secret;
 
 extern crate pool;
@@ -30,6 +33,6 @@ async fn main() -> anyhow::Result<()> {
     let services = app.services()?;
 
     // todo delete test database
-    
+
     Ok(())
 }

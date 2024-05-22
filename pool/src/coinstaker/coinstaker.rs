@@ -1,19 +1,17 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
 use axum::async_trait;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use serde_json::Value;
 use sqlx::PgPool;
 use tokio::select;
 use tokio::sync::{mpsc, oneshot};
 use tokio_graceful_shutdown::{IntoSubsystem, SubsystemHandle};
 use tracing::{debug, error, info, instrument, trace, warn};
-use vrsc_rpc::bitcoin::{BlockHash, Txid};
+use vrsc_rpc::bitcoin::BlockHash;
 use vrsc_rpc::client::{Client as VerusClient, RpcApi};
-use vrsc_rpc::json::identity::{Identity, IdentityPrimary};
+use vrsc_rpc::json::identity::IdentityPrimary;
 use vrsc_rpc::json::vrsc::Address;
 use vrsc_rpc::json::{Block, ValidationType};
 
@@ -25,7 +23,7 @@ use crate::util::verus;
 
 use super::config::Config as CoinstakerConfig;
 use super::constants::Staker;
-use super::{CurrencyId, IdentityAddress, StakerStatus};
+use super::{IdentityAddress, StakerStatus};
 pub struct CoinStaker {
     pool: PgPool,
     config: CoinstakerConfig,
@@ -63,7 +61,7 @@ impl CoinStaker {
         while let Some(msg) = self.rx.recv().await {
             match msg {
                 CoinStakerMessage::Block(block_hash) => {
-                    info!("received new block {block_hash}");
+                    info!(?block_hash, "received new block!");
 
                     // 1. check subscription of currenctly active subscribers.
                     // 2. check if any pending stakes have matured
@@ -85,7 +83,7 @@ impl CoinStaker {
                     )
                     .await?;
                     self.check_active_stakers(&verus_client, &block).await?;
-                    self.check_pending_stakes(&verus_client).await?;
+                    self.check_maturing_stakes(&verus_client).await?;
                     if self.daemon_is_staking(&verus_client).await? == false {
                         continue; // break here, don't add work for daemons that are not staking
                     };
@@ -113,7 +111,33 @@ impl CoinStaker {
         Ok(())
     }
 
-    async fn check_pending_stakes(&self, client: &VerusClient) -> Result<()> {
+    async fn check_maturing_stakes(&self, client: &VerusClient) -> Result<()> {
+        let maturing_stakes =
+            database::get_stakes_by_status(&self.pool, StakeStatus::Maturing).await?;
+
+        for mut stake in maturing_stakes {
+            let block = client.get_block(&stake.block_hash, 2)?;
+
+            if block.confirmations < 0 {
+                trace!(?stake, "stake is stale");
+
+                stake.status = StakeStatus::Stale;
+                database::store_stake(&self.pool, &stake).await?;
+                // TODO send webhook message
+
+                return Ok(());
+            }
+
+            if block.confirmations < 150 {
+                if check_stake_guard(&self.pool, &block, stake.clone()).await? {
+                    return Ok(());
+                }
+
+                trace!(?stake, "stake still maturing");
+            } else {
+                trace!(?stake, "stake has matured");
+            }
+        }
         // get pending stakes from database
         // check if any has matured
         // check if stake was stolen
@@ -142,9 +166,6 @@ impl CoinStaker {
     /// An exception is made when an UTXO is cooling down after mining a block
     /// for the staking pool. It is still counted towards work.
     async fn add_work(&self, active_stakers: &Vec<Staker>, blockheight: u64) -> Result<()> {
-        let pending_stakes =
-            database::get_stakes_by_status(&self.pool, String::from("pending")).await?;
-
         let verus_client = self.verusd()?;
 
         let eligible_stakers = verus_client.list_unspent(
@@ -176,11 +197,14 @@ impl CoinStaker {
                 acc
             });
 
-        pending_stakes.iter().for_each(|stake| {
+        let maturing_stakes =
+            database::get_stakes_by_status(&self.pool, StakeStatus::Maturing).await?;
+
+        maturing_stakes.iter().for_each(|stake| {
             if payload.contains_key(&stake.found_by) {
                 trace!("adding work to staker to undo punishment (cooling down utxo after stake)");
                 payload.entry(stake.found_by.clone()).and_modify(|v| {
-                    debug!("pos_source_amount: {}", stake.source_amount.as_sat() as i64);
+                    debug!("source_amount: {}", stake.source_amount.as_sat() as i64);
                     debug!("sum: {}", v);
                     *v += Decimal::from_i64(stake.source_amount.as_sat() as i64).unwrap()
                 });
@@ -199,13 +223,11 @@ impl CoinStaker {
         active_stakers: &Vec<Staker>,
     ) -> Result<()> {
         if let Some(stake) = self.is_stake(&block_hash).await? {
-            debug!(?block_hash, "!!!!! STAKE FOUND !!!!!");
+            debug!(?stake, "!!!!! STAKE FOUND !!!!!");
 
-            // TODO move all work until now to this round
-            // TODO store stake
-
-            // TODO websocket.send(new stake)
+            database::store_new_stake(&self.pool, &stake).await?;
         }
+
         Ok(())
     }
 
@@ -213,6 +235,8 @@ impl CoinStaker {
     async fn is_stake(&self, block_hash: &BlockHash) -> Result<Option<Stake>> {
         let client = self.verusd()?;
         let block = client.get_block(block_hash, 2)?;
+
+        // block.confirmations == -1 indicates it is stale and should be ignored
         if matches!(block.validation_type, ValidationType::Stake) && block.confirmations >= 0 {
             let postxddest = block
                 .postxddest
@@ -263,7 +287,7 @@ impl CoinStaker {
                     .possourcevoutnum
                     .context("there should always be a stake spend vout")?,
                 staker_utxo_value,
-                StakeStatus::Pending,
+                StakeStatus::Maturing,
                 coinbase_value,
             );
 
@@ -284,7 +308,8 @@ impl CoinStaker {
                 .primaryaddresses
                 .contains(&self.config.pool_primary_address)
         {
-            debug!("identity is eligible");
+            debug!(?identity, "identity is eligible");
+
             return true;
             // TODO
             // match identity.flags {
@@ -402,6 +427,31 @@ impl CoinStaker {
 
         Ok(())
     }
+}
+
+/// Returns true if a stake was stolen and caught by StakeGuard
+async fn check_stake_guard(pool: &PgPool, block: &Block, mut stake: Stake) -> Result<bool> {
+    if block
+        .tx
+        .first() // we always need the coinbase, it is always first
+        .unwrap() // unwrap because every block has a coinbase
+        .vout
+        .first()
+        .unwrap() // unwrap because every tx has a vout, and the first vout of a coinbase is the pool address
+        .spent_tx_id
+        .is_some()
+    {
+        trace!("The transaction was spent by stakeguard");
+        stake.status = StakeStatus::StakeGuard;
+
+        database::store_stake(pool, &stake).await?;
+        // TODO punish perpetrator
+        // TODO send webhook message
+
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 #[async_trait]

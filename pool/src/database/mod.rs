@@ -4,17 +4,16 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use sqlx::types::Decimal;
-use sqlx::Row;
 use sqlx::{postgres::PgRow, PgPool, Postgres, QueryBuilder};
+use sqlx::{Row, Transaction};
 use tracing::debug;
-use vrsc_rpc::json::identity::{self, Identity};
+use vrsc_rpc::json::identity::Identity;
 use vrsc_rpc::json::vrsc::{Address, Amount};
 
-use crate::coinstaker::constants::{Stake, Staker};
-use crate::coinstaker::{CurrencyId, IdentityAddress, StakerStatus};
-use crate::database::constants::DbStaker;
+use crate::coinstaker::constants::{Stake, StakeStatus, Staker};
+use crate::coinstaker::StakerStatus;
+use crate::database::constants::{DbStake, DbStaker};
 
 #[allow(unused)]
 pub async fn store_staker(
@@ -129,86 +128,11 @@ pub async fn get_staker(
 ///
 /// Every active staker gets their share (their stake) added as work.
 /// Payload contains all the addresses and their stake, which are written to the database.
-pub async fn store_work(
-    pool: &PgPool,
-    currency_address: &Address,
-    payload: HashMap<Address, Decimal>,
-    last_blockheight: u64,
-) -> Result<()> {
-    let mut tx = pool.begin().await?;
-
-    let mut query_builder: QueryBuilder<Postgres> =
-        QueryBuilder::new("INSERT INTO work (currency_address, round, staker_address, shares) ");
-
-    let tuples = payload.iter().map(|(staker_address, shares)| {
-        (
-            currency_address.to_string(),
-            0,
-            staker_address.to_string(),
-            shares,
-        )
-    });
-
-    debug!("tuples work: {tuples:?}");
-
-    query_builder.push_values(tuples, |mut b, tuple| {
-        b.push_bind(tuple.0)
-            .push_bind(tuple.1)
-            .push_bind(tuple.2)
-            .push_bind(tuple.3);
-    });
-
-    query_builder.push(
-        " ON CONFLICT (currency_address, round, staker_address) 
-        DO UPDATE SET shares = work.shares + EXCLUDED.shares
-        WHERE work.currency_address = EXCLUDED.currency_address 
-        AND work.round = EXCLUDED.round 
-        AND work.staker_address = EXCLUDED.staker_address",
-    );
-
-    query_builder.build().execute(&mut *tx).await?;
-
-    let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO last_state (currency_address, staker_address, latest_round, latest_work) ",
-    );
-
-    let tuples = payload.iter().map(|(staker_address, shares)| {
-        (
-            currency_address.to_string(),
-            staker_address.to_string(),
-            last_blockheight as i64,
-            shares,
-        )
-    });
-
-    debug!("tuples last_state: {tuples:?}");
-
-    query_builder.push_values(tuples, |mut b, tuple| {
-        b.push_bind(tuple.0)
-            .push_bind(tuple.1)
-            .push_bind(tuple.2)
-            .push_bind(tuple.3);
-    });
-
-    query_builder.push(
-        " ON CONFLICT (currency_address, staker_address) 
-        DO UPDATE SET latest_round = EXCLUDED.latest_round, latest_work = EXCLUDED.latest_work
-        WHERE latest_state.currency_address = EXCLUDED.currency_address 
-        AND latest_state.staker_address = EXCLUDED.staker_address",
-    );
-
-    query_builder.build().execute(&mut *tx).await?;
-
-    tx.commit().await?;
-
-    Ok(())
-}
-
 pub async fn store_work_v2(
     pool: &PgPool,
     currency_address: &Address,
     payload: HashMap<Address, Decimal>,
-    last_blockheight: u64,
+    _last_blockheight: u64,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
 
@@ -233,8 +157,119 @@ pub async fn store_work_v2(
     Ok(())
 }
 
-pub async fn get_stakes_by_status(pool: &PgPool, status: String) -> Result<Vec<Stake>> {
-    Ok(vec![])
+// used when a stake was found to be stale or stolen. Work that was assigned to a round
+// before, should be moved back to round 0.
+pub async fn move_work_to_round_zero(
+    pool: &PgPool,
+    currency_address: &Address,
+    from_round: u64,
+) -> Result<()> {
+    sqlx::query!(
+        "WITH round_to_move AS (
+            SELECT currency_address, round, staker_address, shares
+            FROM work 
+            WHERE currency_address = $1 AND round = $2
+        )
+        INSERT INTO work (currency_address, round, staker_address, shares) 
+        SELECT currency_address, 0, staker_address, shares
+        FROM round_to_move
+        ON CONFLICT (currency_address, round, staker_address)
+        DO UPDATE SET shares = work.shares + EXCLUDED.shares",
+        currency_address.to_string(),
+        from_round as i64
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+// used when a stake is found. Work until now needs to be moved to a round
+// to be able to calculate a payout properly
+async fn move_work_to_new_round(
+    tx: &mut Transaction<'_, Postgres>,
+    currency_address: &Address,
+    from_round: u64,
+    to_round: u64,
+) -> Result<()> {
+    sqlx::query!(
+        "UPDATE work SET round = $3 WHERE currency_address = $1 AND round = $2",
+        currency_address.to_string(),
+        from_round as i64,
+        to_round as i64
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn store_new_stake(pool: &PgPool, stake: &Stake) -> Result<()> {
+    let mut tx = pool.begin().await?;
+
+    move_work_to_new_round(&mut tx, &stake.currency_address, 0, stake.block_height).await?;
+
+    sqlx::query_file!(
+        "sql/store_stake.sql",
+        stake.currency_address.to_string(),
+        stake.block_hash.to_string(),
+        stake.block_height as i64,
+        stake.amount.as_sat() as i64,
+        stake.found_by.to_string(),
+        stake.source_txid.to_string(),
+        stake.source_vout_num as i32,
+        stake.source_amount.as_sat() as i64,
+        stake.status as _
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
+pub async fn store_stake(pool: &PgPool, stake: &Stake) -> Result<()> {
+    sqlx::query_file!(
+        "sql/store_stake.sql",
+        stake.currency_address.to_string(),
+        stake.block_hash.to_string(),
+        stake.block_height as i64,
+        stake.amount.as_sat() as i64,
+        stake.found_by.to_string(),
+        stake.source_txid.to_string(),
+        stake.source_vout_num as i32,
+        stake.source_amount.as_sat() as i64,
+        stake.status as _
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn get_stakes_by_status(pool: &PgPool, status: StakeStatus) -> Result<Vec<Stake>> {
+    let rows = sqlx::query_as!(
+        DbStake,
+        r#"SELECT 
+            currency_address,
+            block_hash,
+            block_height,
+            amount,
+            found_by,
+            source_txid,
+            source_vout_num,
+            source_amount,
+            status AS "status: _"
+        FROM stakes 
+        WHERE status = $1"#,
+        status as StakeStatus
+    )
+    .try_map(Stake::try_from)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
 }
 
 #[cfg(test)]
