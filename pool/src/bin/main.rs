@@ -16,8 +16,6 @@ async fn main() -> Result<(), anyhow::Error> {
     trace!("logging enabled");
 
     let config = app_config().await?;
-    let conn_string = config.database.connection_string();
-    info!("{conn_string}");
 
     let app = App::new(config).await?;
     let services = app.services()?;

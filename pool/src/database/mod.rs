@@ -7,8 +7,6 @@ use anyhow::Result;
 use sqlx::types::Decimal;
 use sqlx::{postgres::PgRow, PgPool, Postgres, QueryBuilder};
 use sqlx::{Row, Transaction};
-use tracing::debug;
-use vrsc_rpc::json::identity::Identity;
 use vrsc_rpc::json::vrsc::{Address, Amount};
 
 use crate::coinstaker::constants::{Stake, StakeStatus, Staker};
@@ -18,20 +16,18 @@ use crate::database::constants::{DbStake, DbStaker};
 #[allow(unused)]
 pub async fn store_staker(
     pool: &PgPool,
-    currency_address: &Address,
-    identity: &Identity,
-    status: StakerStatus,
-    min_payout: u64,
+    staker: &Staker, // currency_address: &Address,
+                     // identity: &Identity,
+                     // status: StakerStatus,
+                     // min_payout: u64,
 ) -> Result<()> {
-    debug!("storing in database.");
-
     sqlx::query_file!(
         "sql/store_staker.sql",
-        currency_address.to_string(),
-        identity.identity.identityaddress.to_string(),
-        identity.fullyqualifiedname,
-        status as StakerStatus,
-        min_payout as i64
+        staker.currency_address.to_string(),
+        staker.identity_address.to_string(),
+        staker.identity_name,
+        &staker.status as _,
+        staker.min_payout.as_sat() as i64
     )
     .execute(pool)
     .await?;
@@ -128,7 +124,7 @@ pub async fn get_staker(
 ///
 /// Every active staker gets their share (their stake) added as work.
 /// Payload contains all the addresses and their stake, which are written to the database.
-pub async fn store_work_v2(
+pub async fn store_work(
     pool: &PgPool,
     currency_address: &Address,
     payload: HashMap<Address, Decimal>,
@@ -287,7 +283,7 @@ mod tests {
             Decimal::from_f64_retain(1.23).unwrap(),
         );
 
-        store_work_v2(&pool, &currency_address, payload, 1)
+        store_work(&pool, &currency_address, payload, 1)
             .await
             .unwrap();
 
@@ -312,7 +308,7 @@ mod tests {
             Decimal::from_f32_retain(1.23).unwrap(),
         );
 
-        store_work_v2(&pool, &currency_address, payload, 1)
+        store_work(&pool, &currency_address, payload, 1)
             .await
             .unwrap();
 
@@ -332,7 +328,7 @@ mod tests {
             Decimal::from_f32_retain(3.77).unwrap(),
         );
 
-        store_work_v2(&pool, &currency_address, payload, 1)
+        store_work(&pool, &currency_address, payload, 1)
             .await
             .unwrap();
 

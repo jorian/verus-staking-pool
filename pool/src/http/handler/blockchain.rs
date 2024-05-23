@@ -1,16 +1,14 @@
 use axum::{debug_handler, Extension, Json};
 use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
+use vrsc_rpc::json::vrsc::Address;
 
-use crate::{
-    coinstaker::{coinstaker::CoinStakerMessage, IdentityAddress},
-    http::constants::StakingSupply,
-};
+use crate::{coinstaker::coinstaker::CoinStakerMessage, http::constants::StakingSupply};
 
 #[derive(Deserialize, Debug)]
 pub struct Identities {
     #[serde(default, rename = "identity_address")]
-    identity_addresses: Vec<IdentityAddress>,
+    identity_addresses: Vec<Address>,
 }
 
 #[debug_handler]

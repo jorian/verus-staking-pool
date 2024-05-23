@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, ops::Deref};
 use vrsc_rpc::{
     bitcoin::{BlockHash, Txid},
     json::{
@@ -19,11 +18,23 @@ pub struct Staker {
     pub status: StakerStatus,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
-pub struct CurrencyId(String);
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
-pub struct IdentityAddress(Address);
+impl Staker {
+    pub fn new(
+        currency_address: Address,
+        identity_address: Address,
+        identity_name: String,
+        min_payout: Amount,
+        status: StakerStatus,
+    ) -> Self {
+        Self {
+            currency_address,
+            identity_address,
+            identity_name,
+            min_payout,
+            status,
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, Clone, Serialize, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "staker_status", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -41,32 +52,6 @@ impl TryFrom<String> for StakerStatus {
             "INACTIVE" => Ok(Self::Inactive),
             _ => Err(anyhow!("Unexpected StakerStatus")),
         }
-    }
-}
-
-impl Display for CurrencyId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Deref for CurrencyId {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl ToString for IdentityAddress {
-    fn to_string(&self) -> String {
-        self.0.to_string()
-    }
-}
-
-impl From<&Address> for IdentityAddress {
-    fn from(value: &Address) -> Self {
-        Self(value.clone())
     }
 }
 

@@ -4,7 +4,10 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use tracing::{debug, error};
 use url::Url;
-use vrsc_rpc::{client::Client as VerusClient, json::vrsc::Address};
+use vrsc_rpc::{
+    client::Client as VerusClient,
+    json::vrsc::{util::amount::serde::as_sat, Address, Amount},
+};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
@@ -12,9 +15,11 @@ pub struct Config {
     pub chain_id: Address,
     pub pool_address: Address,
     pub pool_primary_address: Address, // R-address stakers should include
-    pub fee: f32,
-    pub min_payout: u64,
-    pub tx_fee: u32,
+    pub fee: f32,                      // basis points
+    #[serde(with = "as_sat")]
+    pub min_payout: Amount,
+    #[serde(with = "as_sat")]
+    pub tx_fee: Amount,
     pub webhook_endpoints: Vec<Url>,
     pub chain_config: ChainConfig,
 }

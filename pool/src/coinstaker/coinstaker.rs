@@ -23,7 +23,7 @@ use crate::util::verus;
 
 use super::config::Config as CoinstakerConfig;
 use super::constants::Staker;
-use super::{IdentityAddress, StakerStatus};
+use super::StakerStatus;
 pub struct CoinStaker {
     pool: PgPool,
     config: CoinstakerConfig,
@@ -84,8 +84,9 @@ impl CoinStaker {
                     .await?;
                     self.check_active_stakers(&verus_client, &block).await?;
                     self.check_maturing_stakes(&verus_client).await?;
+
                     if self.daemon_is_staking(&verus_client).await? == false {
-                        continue; // break here, don't add work for daemons that are not staking
+                        continue; // don't add work for not staking daemon
                     };
 
                     self.add_work(&active_stakers, block.height).await?;
@@ -168,17 +169,17 @@ impl CoinStaker {
     async fn add_work(&self, active_stakers: &Vec<Staker>, blockheight: u64) -> Result<()> {
         let verus_client = self.verusd()?;
 
-        let eligible_stakers = verus_client.list_unspent(
-            Some(150),
-            None,
-            Some(
-                active_stakers
-                    .iter()
-                    .map(|subscriber| subscriber.identity_address.clone())
-                    .collect::<Vec<Address>>()
-                    .as_ref(),
-            ),
-        )?;
+        let active_staker_addresses = active_stakers
+            .iter()
+            .map(|subscriber| subscriber.identity_address.clone())
+            .collect::<Vec<Address>>();
+
+        if active_staker_addresses.is_empty() {
+            return Ok(());
+        }
+
+        let eligible_stakers =
+            verus_client.list_unspent(Some(150), None, Some(active_staker_addresses.as_ref()))?;
 
         let mut payload = eligible_stakers
             .into_iter()
@@ -211,7 +212,7 @@ impl CoinStaker {
             }
         });
 
-        database::store_work_v2(&self.pool, &self.chain_id, payload, blockheight).await?;
+        database::store_work(&self.pool, &self.chain_id, payload, blockheight).await?;
 
         Ok(())
     }
@@ -334,10 +335,7 @@ impl CoinStaker {
         false
     }
 
-    async fn get_staking_supply(
-        &self,
-        _identity_addresses: Vec<IdentityAddress>,
-    ) -> Result<StakingSupply> {
+    async fn get_staking_supply(&self, _identity_addresses: Vec<Address>) -> Result<StakingSupply> {
         let verus_client = self.verusd()?;
 
         // let mut subscriptions =
@@ -352,11 +350,8 @@ impl CoinStaker {
         for tx in &block.tx {
             for vout in &tx.vout {
                 if let Some(identity_primary) = &vout.script_pubkey.identityprimary {
-                    self.check_staker_status(
-                        &verus_client,
-                        &(&identity_primary.identityaddress).into(),
-                    )
-                    .await?;
+                    self.check_staker_status(&verus_client, &identity_primary.identityaddress)
+                        .await?;
                 }
             }
         }
@@ -369,7 +364,7 @@ impl CoinStaker {
     async fn check_staker_status(
         &self,
         client: &VerusClient,
-        identity_address: &IdentityAddress,
+        identity_address: &Address,
     ) -> Result<()> {
         let identity = client.get_identity(&identity_address.to_string())?;
 
@@ -384,41 +379,50 @@ impl CoinStaker {
 
             match staker.status {
                 StakerStatus::Active => {
+                    if self.identity_is_eligible(&identity.identity) == false {
+                        trace!(?identity, "a change to this verusid made it inactive");
+
+                        database::store_staker(&self.pool, &staker).await?;
+                    }
+
                     // if staker is not eligible anymore, deactivate
-                    // self.webhooks.send(deactivated)
+                    // TODO self.webhooks.send(deactivated)
                 }
                 // any previously active stakers that update their identity, become
                 // inactive.
                 StakerStatus::Inactive => {
                     if self.identity_is_eligible(&identity.identity) {
-                        database::store_staker(
-                            &self.pool,
-                            &self.chain_id,
-                            &identity,
-                            StakerStatus::Active,
+                        let staker = Staker::new(
+                            self.chain_id.clone(),
+                            identity.identity.identityaddress.clone(),
+                            identity.fullyqualifiedname.clone(),
                             self.config.min_payout,
-                        )
-                        .await?;
+                            StakerStatus::Active,
+                        );
+
+                        database::store_staker(&self.pool, &staker).await?;
                         // update in database.
                     }
                     // if staker became eligible, reactivate
-                    // self.webhooks.send(activated)
+                    // TODO self.webhooks.send(activated)
                 }
             }
         } else {
-            debug!("staker not found in database");
-            if self.identity_is_eligible(&identity.identity) {
-                debug!("new staker, store in database.");
-                database::store_staker(
-                    &self.pool,
-                    &self.chain_id,
-                    &identity,
-                    StakerStatus::Active,
-                    self.config.min_payout,
-                )
-                .await?;
+            trace!("verusid not found in database");
 
-                // self.webhooks.send(activated)
+            if self.identity_is_eligible(&identity.identity) {
+                let staker = Staker::new(
+                    self.chain_id.clone(),
+                    identity.identity.identityaddress.clone(),
+                    identity.fullyqualifiedname.clone(),
+                    self.config.min_payout,
+                    StakerStatus::Active,
+                );
+
+                database::store_staker(&self.pool, &staker).await?;
+                trace!("new staker stored in database.");
+
+                // TODO self.webhooks.send(activated)
             }
             // if the staker does not yet exist, we should check if it contains
             // the primary address of the pool
@@ -485,6 +489,6 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
 #[derive(Debug)]
 pub enum CoinStakerMessage {
     Block(BlockHash),
-    StakingSupply(oneshot::Sender<StakingSupply>, Vec<IdentityAddress>),
+    StakingSupply(oneshot::Sender<StakingSupply>, Vec<Address>),
     Balance(oneshot::Sender<f64>),
 }
