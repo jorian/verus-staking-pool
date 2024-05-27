@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use tracing::{debug, error};
+use tracing::debug;
 use url::Url;
 use vrsc_rpc::{
     client::Client as VerusClient,
@@ -70,9 +70,9 @@ pub fn get_coin_configurations() -> Result<Vec<Config>> {
             }
         }
     } else {
-        error!("no `coin_config` directory set in root directory");
+        Err(anyhow!("no `coin_config` directory set in root directory"))?;
     }
-    debug!("coin_settings: {:?}", coin_settings);
+    debug!("coin_settings: {:#?}", coin_settings);
 
     Ok(coin_settings)
 }

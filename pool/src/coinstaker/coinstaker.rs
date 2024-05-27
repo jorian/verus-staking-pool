@@ -82,7 +82,7 @@ impl CoinStaker {
                         StakerStatus::Active,
                     )
                     .await?;
-                    self.check_active_stakers(&verus_client, &block).await?;
+                    self.check_stakers(&verus_client, &block).await?;
                     self.check_maturing_stakes(&verus_client).await?;
 
                     if self.daemon_is_staking(&verus_client).await? == false {
@@ -346,7 +346,7 @@ impl CoinStaker {
         Ok(staking_supply)
     }
 
-    async fn check_active_stakers(&self, verus_client: &VerusClient, block: &Block) -> Result<()> {
+    async fn check_stakers(&self, verus_client: &VerusClient, block: &Block) -> Result<()> {
         for tx in &block.tx {
             for vout in &tx.vout {
                 if let Some(identity_primary) = &vout.script_pubkey.identityprimary {
@@ -355,9 +355,26 @@ impl CoinStaker {
                 }
             }
         }
-        // requirements
-        // - get_identity() for every identityprimary in transaction vouts
-        // -
+
+        let cooling_down_stakers =
+            database::get_stakers_by_status(&self.pool, &self.chain_id, StakerStatus::CoolingDown)
+                .await?;
+
+        for mut cooling_down_staker in cooling_down_stakers {
+            let identity = verus_client.get_identity_history(
+                &cooling_down_staker.identity_address.to_string(),
+                0,
+                99999999,
+            )?;
+            if identity.blockheight < block.height.saturating_sub(150) as i64 {
+                trace!(?cooling_down_staker, "id has cooled down, activate");
+                cooling_down_staker.status = StakerStatus::Active;
+                database::store_staker(&self.pool, &cooling_down_staker).await?;
+            } else {
+                trace!(?cooling_down_staker, "staker still cooling down");
+            }
+        }
+
         Ok(())
     }
 
@@ -368,7 +385,7 @@ impl CoinStaker {
     ) -> Result<()> {
         let identity = client.get_identity(&identity_address.to_string())?;
 
-        if let Some(staker) = database::get_staker(
+        if let Some(mut staker) = database::get_staker(
             &self.pool,
             &self.chain_id,
             &identity.identity.identityaddress,
@@ -381,27 +398,33 @@ impl CoinStaker {
                 StakerStatus::Active => {
                     if self.identity_is_eligible(&identity.identity) == false {
                         trace!(?identity, "a change to this verusid made it inactive");
+                        staker.status = StakerStatus::Inactive;
+                        database::store_staker(&self.pool, &staker).await?;
+                    } else {
+                        // if it is active, but it updated their id, staking rules
+                        // prevent it from staking for 150 blocks.
+                        // need to set a cooldown period
 
+                        staker.status = StakerStatus::CoolingDown;
                         database::store_staker(&self.pool, &staker).await?;
                     }
 
                     // if staker is not eligible anymore, deactivate
                     // TODO self.webhooks.send(deactivated)
                 }
-                // any previously active stakers that update their identity, become
-                // inactive.
-                StakerStatus::Inactive => {
-                    if self.identity_is_eligible(&identity.identity) {
-                        let staker = Staker::new(
-                            self.chain_id.clone(),
-                            identity.identity.identityaddress.clone(),
-                            identity.fullyqualifiedname.clone(),
-                            self.config.min_payout,
-                            StakerStatus::Active,
-                        );
+                StakerStatus::CoolingDown => {
+                    // an update was made to a staker that was already cooling down.
+                    if self.identity_is_eligible(&identity.identity) == false {
+                        trace!(?identity, "a change to this verusid made it inactive");
 
                         database::store_staker(&self.pool, &staker).await?;
-                        // update in database.
+                    }
+                }
+                StakerStatus::Inactive => {
+                    if self.identity_is_eligible(&identity.identity) {
+                        trace!(?staker, "inactive staker got reactivated");
+                        staker.status = StakerStatus::CoolingDown;
+                        database::store_staker(&self.pool, &staker).await?;
                     }
                     // if staker became eligible, reactivate
                     // TODO self.webhooks.send(activated)
@@ -438,10 +461,10 @@ async fn check_stake_guard(pool: &PgPool, block: &Block, mut stake: Stake) -> Re
     if block
         .tx
         .first() // we always need the coinbase, it is always first
-        .unwrap() // unwrap because every block has a coinbase
+        .expect("every block has a coinbase tx")
         .vout
         .first()
-        .unwrap() // unwrap because every tx has a vout, and the first vout of a coinbase is the pool address
+        .expect("every tx has at least 1 vout")
         .spent_tx_id
         .is_some()
     {
@@ -462,6 +485,14 @@ async fn check_stake_guard(pool: &PgPool, block: &Block, mut stake: Stake) -> Re
 impl IntoSubsystem<anyhow::Error> for CoinStaker {
     async fn run(mut self, subsys: SubsystemHandle) -> Result<()> {
         info!("starting coinstaker {}", self.config.chain_name);
+        let client = self.verusd()?;
+
+        // some preflight checks are needed:
+
+        // if daemon is not staking, the work will not be counted towards shares
+        if client.get_mining_info()?.staking == false {
+            warn!("daemon is not staking, subscriber work will not be accumulated");
+        }
 
         tokio::spawn(super::zmq::tmq_block_listen(
             self.config.chain_config.zmq_port_blocknotify,

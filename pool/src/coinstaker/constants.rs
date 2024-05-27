@@ -40,6 +40,7 @@ impl Staker {
 #[sqlx(type_name = "staker_status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StakerStatus {
     Active,
+    CoolingDown,
     Inactive,
 }
 
