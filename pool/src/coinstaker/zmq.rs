@@ -3,7 +3,7 @@ use std::str::FromStr;
 use anyhow::Result;
 use futures_util::stream::StreamExt;
 use tokio::sync::mpsc;
-use tracing::{debug, error};
+use tracing::error;
 use vrsc_rpc::bitcoin::BlockHash;
 
 use super::coinstaker::CoinStakerMessage;
@@ -24,7 +24,6 @@ pub(super) async fn tmq_block_listen(
                     .map(|byte| format!("{:02x}", *byte))
                     .collect::<Vec<_>>()
                     .join("");
-                debug!("blockhash: {}", block_hash);
 
                 cx_tx
                     .send(CoinStakerMessage::Block(BlockHash::from_str(&block_hash)?))

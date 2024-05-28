@@ -4,7 +4,7 @@ use axum::{
     extract::{MatchedPath, Path, Request, State},
     middleware::{self, Next},
     response::Response,
-    routing::get,
+    routing::{get, put},
 };
 use reqwest::StatusCode;
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse};
@@ -67,6 +67,10 @@ pub fn currency_router(state: AppState) -> axum::Router {
         .route(
             "/:currency/stakingsupply",
             get(handler::blockchain::staking_supply),
+        )
+        .route(
+            "/:currency/stakerstatus",
+            put(handler::staker::staker_status),
         )
         .route_layer(middleware::from_fn_with_state(state.clone(), my_middleware))
         .with_state(state)

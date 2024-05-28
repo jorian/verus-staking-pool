@@ -38,12 +38,12 @@ pub async fn store_staker(
 pub async fn get_stakers_by_identity_address(
     pool: &PgPool,
     currency_address: &Address,
-    identity_addresses: Vec<Address>,
+    identity_addresses: &Vec<Address>,
 ) -> Result<Vec<Staker>> {
     let mut query_builder: QueryBuilder<Postgres> = sqlx::QueryBuilder::new(
         "SELECT *
         FROM stakers 
-        WHERE (currencyid, identityaddress) IN ",
+        WHERE (currency_address, identity_address) IN ",
     );
 
     query_builder.push_tuples(identity_addresses, |mut b, identity_address| {
@@ -57,11 +57,11 @@ pub async fn get_stakers_by_identity_address(
     let subs = rows
         .into_iter()
         .map(|row| Staker {
-            currency_address: Address::from_str(row.get("currencyid")).unwrap(),
-            identity_address: Address::from_str(row.get("identityaddress")).unwrap(),
-            identity_name: row.get("identityname"),
+            currency_address: Address::from_str(row.get("currency_address")).unwrap(),
+            identity_address: Address::from_str(row.get("identity_address")).unwrap(),
+            identity_name: row.get("identity_name"),
             min_payout: Amount::from_sat(row.get::<i64, &str>("min_payout") as u64),
-            status: row.get::<String, &str>("status").try_into().unwrap(),
+            status: row.get::<StakerStatus, &str>("status").try_into().unwrap(),
         })
         .collect::<Vec<_>>();
 

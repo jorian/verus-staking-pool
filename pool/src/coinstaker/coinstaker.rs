@@ -99,6 +99,15 @@ impl CoinStaker {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
+                CoinStakerMessage::StakerStatus(os_tx, identity_address) => {
+                    let verus_client = self.verusd()?;
+                    self.check_staker_status(&verus_client, &identity_address)
+                        .await?;
+
+                    os_tx
+                        .send("success".to_string())
+                        .expect("a oneshot message failed to send");
+                }
                 CoinStakerMessage::Balance(os_tx) => {
                     let balance = self.verusd()?.get_balance(None, None)?;
 
@@ -335,13 +344,44 @@ impl CoinStaker {
         false
     }
 
-    async fn get_staking_supply(&self, _identity_addresses: Vec<Address>) -> Result<StakingSupply> {
+    /// Gets the staking supply of the given addresses
+    ///
+    /// Clients should figure out themselves whether the address is a staker in their pool.
+    ///
+    /// Addresses that are given but not known in this pool will return 0.
+    async fn get_staking_supply(&self, identity_addresses: Vec<Address>) -> Result<StakingSupply> {
         let verus_client = self.verusd()?;
+        let block_height = verus_client.get_mining_info()?.blocks;
 
-        // let mut subscriptions =
-        //     database::get_subscriptions(&self.pool, &self.chain_id, identity_addresses).await?;
+        // let active_addresses = identity_addresses
+        let stakers = database::get_stakers_by_identity_address(
+            &self.pool,
+            &self.chain_id,
+            &identity_addresses,
+        )
+        .await?;
 
-        let staking_supply = verus::get_staking_supply(&verus_client)?;
+        let identity_addresses = stakers
+            .into_iter()
+            .filter(|s| {
+                let is_subscribed = &s.status == &StakerStatus::Active;
+                let is_cooled_down = if let Ok(identity) =
+                    verus_client.get_identity_history(&s.identity_address.to_string(), 0, 9999999)
+                {
+                    let block = verus_client.get_block_by_height(block_height, 2).unwrap();
+
+                    identity.blockheight < block.height.saturating_sub(150) as i64
+                } else {
+                    false
+                };
+
+                is_subscribed && is_cooled_down
+            })
+            .map(|s| s.identity_address)
+            .collect::<Vec<_>>();
+
+        let staking_supply =
+            verus::get_staking_supply(&self.chain_id, &identity_addresses, &verus_client)?;
 
         Ok(staking_supply)
     }
@@ -439,7 +479,7 @@ impl CoinStaker {
                     identity.identity.identityaddress.clone(),
                     identity.fullyqualifiedname.clone(),
                     self.config.min_payout,
-                    StakerStatus::Active,
+                    StakerStatus::CoolingDown,
                 );
 
                 database::store_staker(&self.pool, &staker).await?;
@@ -521,5 +561,6 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
 pub enum CoinStakerMessage {
     Block(BlockHash),
     StakingSupply(oneshot::Sender<StakingSupply>, Vec<Address>),
+    StakerStatus(oneshot::Sender<String>, Address),
     Balance(oneshot::Sender<f64>),
 }
