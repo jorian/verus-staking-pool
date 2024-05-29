@@ -268,6 +268,42 @@ pub async fn get_stakes_by_status(pool: &PgPool, status: StakeStatus) -> Result<
     Ok(rows)
 }
 
+pub async fn update_sync_id(
+    pool: &PgPool,
+    currency_address: &Address,
+    block_height: u64,
+) -> Result<()> {
+    let _res = sqlx::query!(
+        "INSERT INTO synchronization (
+            currency_address, 
+            last_height
+        ) VALUES ($1, $2) 
+        ON CONFLICT (currency_address) 
+        DO UPDATE 
+        SET last_height = $2",
+        currency_address.to_string(),
+        block_height as i64
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn get_last_height(pool: &PgPool, currency_address: &Address) -> Result<Option<u64>> {
+    let row = sqlx::query!(
+        "SELECT last_height 
+        FROM synchronization 
+        WHERE currency_address = $1",
+        currency_address.to_string()
+    )
+    .map(|r| r.last_height as u64)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

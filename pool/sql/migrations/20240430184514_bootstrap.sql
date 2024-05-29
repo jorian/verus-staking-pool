@@ -48,6 +48,14 @@ CREATE TABLE stakes (
     PRIMARY KEY(currency_address, block_hash)
 );
 
+CREATE TABLE synchronization (
+    currency_address TEXT NOT NULL,
+    last_height bigint NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY(currency_address)
+);
+
 CREATE OR REPLACE FUNCTION trigger_set_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -60,3 +68,4 @@ $$ language 'plpgsql';
 CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON stakers FOR EACH ROW EXECUTE PROCEDURE trigger_set_timestamp();
 CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON stakes FOR EACH ROW EXECUTE PROCEDURE trigger_set_timestamp();
 CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON work FOR EACH ROW EXECUTE PROCEDURE trigger_set_timestamp();
+CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON synchronization FOR EACH ROW EXECUTE PROCEDURE trigger_set_timestamp();

@@ -91,6 +91,8 @@ impl CoinStaker {
 
                     self.add_work(&active_stakers, block.height).await?;
                     self.check_for_stake(&block_hash, &active_stakers).await?;
+
+                    database::update_sync_id(&self.pool, &self.chain_id, block.height).await?;
                 }
                 CoinStakerMessage::StakingSupply(os_tx, identity_addresses) => {
                     let res = self.get_staking_supply(identity_addresses).await?;
@@ -531,7 +533,27 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
 
         // if daemon is not staking, the work will not be counted towards shares
         if client.get_mining_info()?.staking == false {
-            warn!("daemon is not staking, subscriber work will not be accumulated");
+            warn!("daemon is not staking, staker work will not be accumulated");
+        }
+
+        if let Some(mut last_height) = database::get_last_height(&self.pool, &self.chain_id).await?
+        {
+            trace!(%last_height, "Do some preflight checks");
+
+            last_height += 1;
+            let chain_tip = client.get_blockchain_info()?.blocks;
+
+            for i in last_height.try_into()?..=chain_tip {
+                let block = client.get_block_by_height(i, 2)?;
+
+                self.check_stakers(&client, &block).await?;
+
+                last_height += 1;
+            }
+
+            self.check_maturing_stakes(&client).await?;
+
+            trace!(%last_height, "Finished doing preflight checks");
         }
 
         tokio::spawn(super::zmq::tmq_block_listen(
@@ -550,7 +572,8 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
                     Err(e) => error!("{e:?}"),
                     _ => {}
                 }
-            }
+            },
+
         }
 
         Ok(())
