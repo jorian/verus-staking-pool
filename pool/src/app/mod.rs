@@ -8,6 +8,7 @@ use crate::{
     config::Config,
     controller::Controller,
     http::HttpService,
+    payout,
 };
 use anyhow::Result;
 use secrecy::ExposeSecret;
@@ -38,16 +39,17 @@ impl App {
     pub fn services(self) -> Result<Toplevel> {
         let chain_configs = get_coin_configurations()?;
         let mut coin_stakers = vec![];
+        let mut coin_staker_payouts = vec![];
         let mut coin_staker_map = HashMap::new();
         for chain_config in chain_configs {
             let (tx, rx) = mpsc::channel::<CoinStakerMessage>(512);
             let chain_id = chain_config.chain_id.clone();
-            coin_stakers.push(CoinStaker::new(
-                self.pool.clone(),
-                chain_config,
-                tx.clone(),
-                rx,
-            )?);
+            let coin_staker =
+                CoinStaker::new(self.pool.clone(), chain_config.clone(), tx.clone(), rx)?;
+            coin_stakers.push(coin_staker);
+
+            let payout = payout::Service::new(chain_config.payout_config, self.pool.clone());
+            coin_staker_payouts.push((chain_id.clone(), payout));
             coin_staker_map.insert(chain_id, tx);
         }
 
@@ -69,6 +71,13 @@ impl App {
                 s.start(SubsystemBuilder::new(
                     format!("CoinStakerService.{}", cs.chain_id.to_string()),
                     cs.into_subsystem(),
+                ));
+            }
+
+            for (name, payout) in coin_staker_payouts {
+                s.start(SubsystemBuilder::new(
+                    format!("CoinStakerPayoutService.{}", name.to_string()),
+                    payout.into_subsystem(),
                 ));
             }
         });

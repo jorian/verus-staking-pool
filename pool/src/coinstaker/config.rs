@@ -22,6 +22,7 @@ pub struct Config {
     pub tx_fee: Amount,
     pub webhook_endpoints: Vec<Url>,
     pub chain_config: ChainConfig,
+    pub payout_config: PayoutConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -31,6 +32,11 @@ pub struct ChainConfig {
     pub rpc_host: String,
     pub rpc_port: u16,
     pub zmq_port_blocknotify: u16,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PayoutConfig {
+    pub interval_in_secs: u64,
 }
 
 impl TryFrom<&ChainConfig> for VerusClient {
