@@ -72,6 +72,7 @@ pub fn currency_router(state: AppState) -> axum::Router {
             "/:currency/stakerstatus",
             put(handler::staker::staker_status),
         )
+        .route("/:currency/staker", get(handler::staker::get_staker))
         .route_layer(middleware::from_fn_with_state(state.clone(), my_middleware))
         .with_state(state)
 }

@@ -61,7 +61,7 @@ impl CoinStaker {
         while let Some(msg) = self.rx.recv().await {
             match msg {
                 CoinStakerMessage::Block(block_hash) => {
-                    info!(?block_hash, "received new block!");
+                    info!(?block_hash, "received new block");
 
                     // 1. check subscription of currenctly active subscribers.
                     // 2. check if any pending stakes have matured
@@ -90,9 +90,9 @@ impl CoinStaker {
                     };
 
                     self.add_work(&active_stakers, block.height).await?;
-                    self.check_for_stake(&block_hash, &active_stakers).await?;
-
                     database::update_sync_id(&self.pool, &self.chain_id, block.height).await?;
+
+                    self.check_for_stake(&block_hash, &active_stakers).await?;
                 }
                 CoinStakerMessage::StakingSupply(os_tx, identity_addresses) => {
                     let res = self.get_staking_supply(identity_addresses).await?;
@@ -114,6 +114,22 @@ impl CoinStaker {
                     let balance = self.verusd()?.get_balance(None, None)?;
 
                     if let Err(_) = os_tx.send(balance.as_vrsc()) {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
+                CoinStakerMessage::GetStaker(os_tx, identity_address, staker_status) => {
+                    let staker = if let Some(status) = staker_status {
+                        database::get_stakers_by_status(&self.pool, &self.chain_id, status)
+                            .await?
+                            .into_iter()
+                            .filter(|s| s.identity_address == identity_address)
+                            .collect::<Vec<_>>()
+                    } else {
+                        database::get_staker(&self.pool, &self.chain_id, &identity_address)
+                            .await?
+                            .map_or(vec![], |s| vec![s])
+                    };
+                    if let Err(_) = os_tx.send(staker) {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -586,4 +602,5 @@ pub enum CoinStakerMessage {
     StakingSupply(oneshot::Sender<StakingSupply>, Vec<Address>),
     StakerStatus(oneshot::Sender<String>, Address),
     Balance(oneshot::Sender<f64>),
+    GetStaker(oneshot::Sender<Vec<Staker>>, Address, Option<StakerStatus>),
 }
