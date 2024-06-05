@@ -1,13 +1,17 @@
 use std::str::FromStr;
 
+use rust_decimal::Decimal;
 use vrsc_rpc::{
     bitcoin::{BlockHash, Txid},
     json::vrsc::{Address, Amount},
 };
 
-use crate::coinstaker::{
-    constants::{Stake, StakeStatus, Staker},
-    StakerStatus,
+use crate::{
+    coinstaker::{
+        constants::{Stake, StakeStatus, Staker},
+        StakerStatus,
+    },
+    payout::Worker,
 };
 
 pub struct DbStaker {
@@ -69,5 +73,26 @@ impl TryFrom<DbStake> for Stake {
         };
 
         Ok(stake)
+    }
+}
+
+pub struct DbWorker {
+    pub(super) identity_address: String,
+    pub(super) shares: Decimal,
+    pub(super) fee: Decimal,
+}
+
+impl TryFrom<DbWorker> for Worker {
+    type Error = sqlx::Error;
+
+    fn try_from(value: DbWorker) -> Result<Self, Self::Error> {
+        let worker = Self {
+            identity_address: Address::from_str(&value.identity_address)
+                .map_err(|e| sqlx::Error::Decode(e.into()))?,
+            shares: value.shares,
+            fee: value.fee,
+        };
+
+        Ok(worker)
     }
 }

@@ -11,6 +11,7 @@ CREATE TABLE stakers (
     identity_name TEXT NOT NULL,
     status staker_status NOT NULL,
     min_payout BIGINT NOT NULL,
+    fee DECIMAL NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (currency_address, identity_address)
@@ -20,7 +21,7 @@ CREATE TABLE work (
     currency_address TEXT NOT NULL,
     round bigint NOT NULL,
     staker_address TEXT NOT NULL,
-    shares DECIMAL,
+    shares DECIMAL NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (currency_address, round, staker_address)

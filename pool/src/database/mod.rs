@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use anyhow::Result;
+use constants::DbWorker;
 use sqlx::types::Decimal;
 use sqlx::{postgres::PgRow, PgPool, Postgres, QueryBuilder};
 use sqlx::{Row, Transaction};
@@ -12,6 +13,7 @@ use vrsc_rpc::json::vrsc::{Address, Amount};
 use crate::coinstaker::constants::{Stake, StakeStatus, Staker};
 use crate::coinstaker::StakerStatus;
 use crate::database::constants::{DbStake, DbStaker};
+use crate::payout::Worker;
 
 #[allow(unused)]
 pub async fn store_staker(
@@ -302,6 +304,27 @@ pub async fn get_last_height(pool: &PgPool, currency_address: &Address) -> Resul
     .await?;
 
     Ok(row)
+}
+
+pub async fn get_workers_by_round(
+    pool: &PgPool,
+    currency_address: &str,
+    round: u64,
+) -> Result<Vec<Worker>> {
+    let workers = sqlx::query_as!(
+        DbWorker,
+        "SELECT identity_address, shares, fee FROM stakers s1
+        JOIN work w1
+        ON w1.staker_address = s1.identity_address AND s1.currency_address = w1.currency_address
+        WHERE w1.round = $1 AND w1.currency_address = $2",
+        round as i64,
+        currency_address
+    )
+    .try_map(Worker::try_from)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(workers)
 }
 
 #[cfg(test)]
