@@ -90,7 +90,7 @@ impl CoinStaker {
                     };
 
                     self.add_work(&active_stakers, block.height).await?;
-                    database::update_sync_id(&self.pool, &self.chain_id, block.height).await?;
+                    database::update_last_height(&self.pool, &self.chain_id, block.height).await?;
 
                     self.check_for_stake(&block_hash, &active_stakers).await?;
                 }
@@ -141,7 +141,7 @@ impl CoinStaker {
 
     async fn check_maturing_stakes(&self, client: &VerusClient) -> Result<()> {
         let maturing_stakes =
-            database::get_stakes_by_status(&self.pool, StakeStatus::Maturing).await?;
+            database::get_stakes_by_status(&self.pool, StakeStatus::Maturing, None).await?;
 
         for mut stake in maturing_stakes {
             let block = client.get_block(&stake.block_hash, 2)?;
@@ -157,13 +157,23 @@ impl CoinStaker {
             }
 
             if block.confirmations < 150 {
-                if check_stake_guard(&self.pool, &block, stake.clone()).await? {
+                if check_stake_guard(&block).await? {
+                    trace!("The transaction was spent by stakeguard");
+                    stake.status = StakeStatus::StakeGuard;
+
+                    database::store_stake(&self.pool, &stake).await?;
+                    // TODO punish perpetrator
+                    // TODO send webhook message
+
                     return Ok(());
                 }
 
                 trace!(?stake, "stake still maturing");
             } else {
                 trace!(?stake, "stake has matured");
+
+                stake.status = StakeStatus::Matured;
+                database::store_stake(&self.pool, &stake).await?;
             }
         }
         // get pending stakes from database
@@ -226,7 +236,7 @@ impl CoinStaker {
             });
 
         let maturing_stakes =
-            database::get_stakes_by_status(&self.pool, StakeStatus::Maturing).await?;
+            database::get_stakes_by_status(&self.pool, StakeStatus::Maturing, None).await?;
 
         maturing_stakes.iter().for_each(|stake| {
             if payload.contains_key(&stake.found_by) {
@@ -515,7 +525,7 @@ impl CoinStaker {
 }
 
 /// Returns true if a stake was stolen and caught by StakeGuard
-async fn check_stake_guard(pool: &PgPool, block: &Block, mut stake: Stake) -> Result<bool> {
+async fn check_stake_guard(block: &Block) -> Result<bool> {
     if block
         .tx
         .first() // we always need the coinbase, it is always first
@@ -526,13 +536,6 @@ async fn check_stake_guard(pool: &PgPool, block: &Block, mut stake: Stake) -> Re
         .spent_tx_id
         .is_some()
     {
-        trace!("The transaction was spent by stakeguard");
-        stake.status = StakeStatus::StakeGuard;
-
-        database::store_stake(pool, &stake).await?;
-        // TODO punish perpetrator
-        // TODO send webhook message
-
         return Ok(true);
     }
 

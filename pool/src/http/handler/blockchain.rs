@@ -16,7 +16,6 @@ pub async fn staking_supply(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     axum_extra::extract::Query(items): axum_extra::extract::Query<Identities>,
 ) -> Json<StakingSupply> {
-    // dbg!(items.identity_addresses);
     let (os_tx, os_rx) = oneshot::channel::<StakingSupply>();
 
     tx.send(CoinStakerMessage::StakingSupply(
@@ -25,6 +24,7 @@ pub async fn staking_supply(
     ))
     .await
     .unwrap();
+
     let ss = os_rx.await.unwrap();
 
     Json(ss)

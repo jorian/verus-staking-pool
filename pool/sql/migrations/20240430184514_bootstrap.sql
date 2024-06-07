@@ -31,7 +31,7 @@ CREATE TYPE stake_status AS ENUM (
     'MATURING',
     'MATURED',
     'STALE',
-    'STOLEN'
+    'STAKEGUARD'
 );
 
 CREATE TABLE stakes (
@@ -52,9 +52,38 @@ CREATE TABLE stakes (
 CREATE TABLE synchronization (
     currency_address TEXT NOT NULL,
     last_height bigint NOT NULL,
+    last_payout_height BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY(currency_address)
+);
+
+CREATE TABLE payouts (
+    currency_address TEXT NOT NULL,
+    block_hash TEXT NOT NULL,
+    block_height BIGINT NOT NULL,
+    amount BIGINT NOT NULL,
+    work DECIMAL NOT NULL,
+    fee BIGINT NOT NULL,
+    amount_paid BIGINT NOT NULL,
+    n_subs BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY(currency_address, block_hash)
+);
+
+CREATE TABLE payout_members (
+    currency_address TEXT NOT NULL,
+    identity_address TEXT NOT NULL,
+    block_hash TEXT NOT NULL,
+    block_height BIGINT NOT NULL,
+    shares DECIMAL NOT NULL,
+    reward BIGINT NOT NULL,
+    fee BIGINT NOT NULL,
+    txid TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY(currency_address, identity_address, block_hash)
 );
 
 CREATE OR REPLACE FUNCTION trigger_set_timestamp()
@@ -70,3 +99,5 @@ CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON stakers FOR EACH ROW EXECU
 CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON stakes FOR EACH ROW EXECUTE PROCEDURE trigger_set_timestamp();
 CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON work FOR EACH ROW EXECUTE PROCEDURE trigger_set_timestamp();
 CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON synchronization FOR EACH ROW EXECUTE PROCEDURE trigger_set_timestamp();
+CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON payouts FOR EACH ROW EXECUTE PROCEDURE trigger_set_timestamp();
+CREATE TRIGGER set_updated_timestamp BEFORE UPDATE ON payout_members FOR EACH ROW EXECUTE PROCEDURE trigger_set_timestamp();

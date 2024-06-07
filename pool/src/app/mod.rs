@@ -48,7 +48,11 @@ impl App {
                 CoinStaker::new(self.pool.clone(), chain_config.clone(), tx.clone(), rx)?;
             coin_stakers.push(coin_staker);
 
-            let payout = payout::Service::new(chain_config.payout_config, self.pool.clone());
+            let payout = payout::Service::new(
+                chain_config.payout_config,
+                self.pool.clone(),
+                chain_id.clone(),
+            );
             coin_staker_payouts.push((chain_id.clone(), payout));
             coin_staker_map.insert(chain_id, tx);
         }

@@ -37,6 +37,7 @@ pub struct ChainConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct PayoutConfig {
     pub interval_in_secs: u64,
+    pub pool_address: Address,
 }
 
 impl TryFrom<&ChainConfig> for VerusClient {

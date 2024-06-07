@@ -11,7 +11,7 @@ use crate::{
         constants::{Stake, StakeStatus, Staker},
         StakerStatus,
     },
-    payout::Worker,
+    payout::{PayoutMember, Worker},
 };
 
 pub struct DbStaker {
@@ -94,5 +94,42 @@ impl TryFrom<DbWorker> for Worker {
         };
 
         Ok(worker)
+    }
+}
+
+pub struct DbPayoutMember {
+    pub(super) currency_address: String,
+    pub(super) identity_address: String,
+    pub(super) block_hash: String,
+    pub(super) block_height: i64,
+    pub(super) shares: Decimal,
+    pub(super) reward: i64,
+    pub(super) fee: i64,
+    pub(super) txid: Option<String>,
+}
+
+impl TryFrom<DbPayoutMember> for PayoutMember {
+    type Error = sqlx::Error;
+
+    fn try_from(value: DbPayoutMember) -> Result<Self, Self::Error> {
+        let payout = Self {
+            currency_address: Address::from_str(&value.currency_address)
+                .map_err(|e| sqlx::Error::Decode(e.into()))?,
+            identity_address: Address::from_str(&value.identity_address)
+                .map_err(|e| sqlx::Error::Decode(e.into()))?,
+            block_hash: BlockHash::from_str(&value.block_hash)
+                .map_err(|e| sqlx::Error::Decode(e.into()))?,
+            block_height: value.block_height as u64,
+            shares: value.shares,
+            reward: Amount::from_sat(value.reward as u64),
+            fee: Amount::from_sat(value.fee as u64),
+            txid: value
+                .txid
+                .map(|txid| Txid::from_str(&txid))
+                .transpose()
+                .map_err(|e| sqlx::Error::Decode(e.into()))?,
+        };
+
+        Ok(payout)
     }
 }

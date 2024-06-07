@@ -1,0 +1,39 @@
+INSERT INTO public.stakes (
+        currency_address,
+        block_hash,
+        block_height,
+        amount,
+        found_by,
+        source_txid,
+        source_vout_num,
+        source_amount,
+        status, 
+        created_at, 
+        updated_at
+    )
+VALUES (
+    'i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV',
+    '00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0',
+    513251,
+    600100000,
+    'i6hr4VXTbhTQCro4X5HN921j36BnD1G9fM',
+    '6b97441d46eb290244720d18bc0bfd24173efcca3aee01649298e0b3c2b960f7',
+    0,
+    600100000,
+    'MATURING',
+    '2023-10-01T14:15:35.237140731Z',
+    '2023-10-01T14:15:35.237140731Z'
+),(
+    'i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV',
+    '00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e1',
+    22222,
+    7680000000,
+    'i6hr4VXTbhTQCro4X5HN921j36BnD1G9fM',
+    '6b97441d46eb290244720d18bc0bfd24173efcca3aee01649298e0b3c2b960f7',
+    0,
+    600100000,
+    'MATURING',
+    '2023-10-02T14:15:35.237140731Z',
+    '2023-10-02T14:15:35.237140731Z'
+);
+

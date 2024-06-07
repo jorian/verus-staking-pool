@@ -1,23 +1,62 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tokio_graceful_shutdown::{IntoSubsystem, SubsystemHandle};
 use tracing::{error, info};
+use vrsc_rpc::json::vrsc::Address;
 
-use crate::coinstaker::PayoutConfig as PayoutServiceConfig;
+use crate::{coinstaker::PayoutConfig as PayoutServiceConfig, database};
+
+use super::payout::Payout;
 
 pub struct Service {
     database: PgPool,
     config: PayoutServiceConfig,
+    chain_id: Address,
 }
 
 impl Service {
-    pub fn new(config: PayoutServiceConfig, database: PgPool) -> Self {
-        Self { database, config }
+    pub fn new(config: PayoutServiceConfig, database: PgPool, chain_id: Address) -> Self {
+        Self {
+            database,
+            config,
+            chain_id,
+        }
     }
 
     async fn new_payout(&self) -> Result<()> {
+        let last_sync_id = database::get_payout_sync_id(&self.database, &self.chain_id).await?;
+
+        let stakes = database::get_stakes_by_status(
+            &self.database,
+            crate::coinstaker::constants::StakeStatus::Matured,
+            Some(last_sync_id),
+        )
+        .await?;
+
+        for stake in stakes {
+            let workers =
+                database::get_workers_by_round(&self.database, &self.chain_id, stake.block_height)
+                    .await?;
+
+            let mut tx = self.database.begin().await?;
+
+            let payout = Payout::new(&stake, workers, Decimal::ZERO)?;
+
+            database::store_payout(&mut tx, &payout).await?;
+
+            for member in payout.members {
+                database::store_payout_member(&mut tx, &member).await?;
+            }
+
+            database::update_last_payout_height(&mut tx, &self.chain_id, stake.block_height)
+                .await?;
+
+            tx.commit().await?;
+        }
+
         Ok(())
     }
 
@@ -31,8 +70,7 @@ impl Service {
 
     async fn keep_sending_payouts(&self) -> Result<()> {
         loop {
-            self.new_payout().await?;
-
+            // TODO send payment
             tokio::time::sleep(Duration::from_secs(self.config.interval_in_secs)).await;
         }
     }
@@ -41,15 +79,17 @@ impl Service {
 #[async_trait::async_trait]
 impl IntoSubsystem<anyhow::Error> for Service {
     async fn run(self, subsys: SubsystemHandle) -> Result<()> {
-        tokio::select! {
-            _ = subsys.on_shutdown_requested() => {
-                info!("PayoutService shutting down")
-            }
-            Err(e) = self.keep_creating_payouts() => {
-                error!("An error occured while doing payouts: {:?}", e);
-            }
-            Err(e) = self.keep_sending_payouts() => {
-                error!("An error occured while sending payouts: {:?}", e);
+        while !subsys.is_shutdown_requested() {
+            tokio::select! {
+                _ = subsys.on_shutdown_requested() => {
+                    info!("PayoutService shutting down")
+                }
+                Err(e) = self.keep_creating_payouts() => {
+                    error!("An error occured while doing payouts: {:?}", e);
+                }
+                Err(e) = self.keep_sending_payouts() => {
+                    error!("An error occured while sending payouts: {:?}", e);
+                }
             }
         }
 

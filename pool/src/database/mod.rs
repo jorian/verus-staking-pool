@@ -5,15 +5,15 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use constants::DbWorker;
+use sqlx::postgres::PgRow;
 use sqlx::types::Decimal;
-use sqlx::{postgres::PgRow, PgPool, Postgres, QueryBuilder};
-use sqlx::{Row, Transaction};
+use sqlx::{PgConnection, PgPool, Postgres, QueryBuilder, Row, Transaction};
 use vrsc_rpc::json::vrsc::{Address, Amount};
 
 use crate::coinstaker::constants::{Stake, StakeStatus, Staker};
 use crate::coinstaker::StakerStatus;
 use crate::database::constants::{DbStake, DbStaker};
-use crate::payout::Worker;
+use crate::payout::{Payout, PayoutMember, Worker};
 
 #[allow(unused)]
 pub async fn store_staker(
@@ -202,6 +202,34 @@ async fn move_work_to_new_round(
     Ok(())
 }
 
+pub async fn get_stake(
+    pool: &PgPool,
+    currency_address: &Address,
+    block_height: u64,
+) -> Result<Option<Stake>> {
+    let value = sqlx::query_as!(
+        DbStake,
+        "SELECT currency_address,
+            block_hash,
+            block_height,
+            amount,
+            found_by,
+            source_txid,
+            source_vout_num,
+            source_amount,
+            status AS \"status: _\" 
+        FROM stakes
+        WHERE currency_address = $1 AND block_height = $2",
+        currency_address.to_string(),
+        block_height as i64
+    )
+    .try_map(Stake::try_from)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(value)
+}
+
 pub async fn store_new_stake(pool: &PgPool, stake: &Stake) -> Result<()> {
     let mut tx = pool.begin().await?;
 
@@ -246,7 +274,11 @@ pub async fn store_stake(pool: &PgPool, stake: &Stake) -> Result<()> {
     Ok(())
 }
 
-pub async fn get_stakes_by_status(pool: &PgPool, status: StakeStatus) -> Result<Vec<Stake>> {
+pub async fn get_stakes_by_status(
+    pool: &PgPool,
+    status: StakeStatus,
+    from_id: Option<u64>,
+) -> Result<Vec<Stake>> {
     let rows = sqlx::query_as!(
         DbStake,
         r#"SELECT 
@@ -260,8 +292,9 @@ pub async fn get_stakes_by_status(pool: &PgPool, status: StakeStatus) -> Result<
             source_amount,
             status AS "status: _"
         FROM stakes 
-        WHERE status = $1"#,
-        status as StakeStatus
+        WHERE status = $1 AND block_height > $2"#,
+        status as StakeStatus,
+        from_id.unwrap_or(0) as i64
     )
     .try_map(Stake::try_from)
     .fetch_all(pool)
@@ -270,7 +303,7 @@ pub async fn get_stakes_by_status(pool: &PgPool, status: StakeStatus) -> Result<
     Ok(rows)
 }
 
-pub async fn update_sync_id(
+pub async fn update_last_height(
     pool: &PgPool,
     currency_address: &Address,
     block_height: u64,
@@ -308,7 +341,7 @@ pub async fn get_last_height(pool: &PgPool, currency_address: &Address) -> Resul
 
 pub async fn get_workers_by_round(
     pool: &PgPool,
-    currency_address: &str,
+    currency_address: &Address,
     round: u64,
 ) -> Result<Vec<Worker>> {
     let workers = sqlx::query_as!(
@@ -318,13 +351,85 @@ pub async fn get_workers_by_round(
         ON w1.staker_address = s1.identity_address AND s1.currency_address = w1.currency_address
         WHERE w1.round = $1 AND w1.currency_address = $2",
         round as i64,
-        currency_address
+        currency_address.to_string()
     )
     .try_map(Worker::try_from)
     .fetch_all(pool)
     .await?;
 
     Ok(workers)
+}
+
+pub async fn get_payout_sync_id(pool: &PgPool, currency_address: &Address) -> Result<u64> {
+    let value = sqlx::query!(
+        "SELECT last_payout_height FROM synchronization WHERE currency_address = $1",
+        currency_address.to_string()
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(value.last_payout_height as u64)
+}
+
+pub async fn update_last_payout_height(
+    pool: &mut PgConnection,
+    currency_address: &Address,
+    block_height: u64,
+) -> Result<()> {
+    let _res = sqlx::query!(
+        "INSERT INTO synchronization (
+            currency_address, 
+            last_payout_height
+        ) VALUES ($1, $2) 
+        ON CONFLICT (currency_address) 
+        DO UPDATE 
+        SET last_payout_height = $2",
+        currency_address.to_string(),
+        block_height as i64
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn store_payout(conn: &mut PgConnection, payout: &Payout) -> Result<()> {
+    sqlx::query_file!(
+        "sql/store_payout.sql",
+        &payout.currency_address.to_string(),
+        &payout.block_hash.to_string(),
+        payout.block_height as i64,
+        payout.amount.as_sat() as i64,
+        &payout.total_work,
+        payout.fee.as_sat() as i64,
+        payout.paid.as_sat() as i64,
+        payout.members.len() as i64
+    )
+    .execute(conn)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn store_payout_member(
+    conn: &mut PgConnection,
+    payout_member: &PayoutMember,
+) -> Result<()> {
+    sqlx::query_file!(
+        "sql/store_payout_member.sql",
+        &payout_member.currency_address.to_string(),
+        &payout_member.identity_address.to_string(),
+        &payout_member.block_hash.to_string(),
+        payout_member.block_height as i64,
+        payout_member.shares,
+        payout_member.reward.as_sat() as i64,
+        payout_member.fee.as_sat() as i64,
+        None::<&str>
+    )
+    .execute(conn)
+    .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
