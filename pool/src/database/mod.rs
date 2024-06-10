@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use anyhow::Result;
-use constants::DbWorker;
+use constants::{DbPayoutMember, DbWorker};
 use sqlx::postgres::PgRow;
 use sqlx::types::Decimal;
 use sqlx::{PgConnection, PgPool, Postgres, QueryBuilder, Row, Transaction};
@@ -430,6 +430,38 @@ pub async fn store_payout_member(
     .await?;
 
     Ok(())
+}
+
+pub async fn get_payout_members(
+    conn: &mut PgConnection,
+    currency_address: &Address,
+    identity_addresses: &Vec<Address>,
+) -> Result<Vec<PayoutMember>> {
+    let values = sqlx::query_as!(
+        DbPayoutMember,
+        "SELECT 
+            currency_address,
+            identity_address,
+            block_hash,
+            block_height,
+            shares,
+            reward,
+            fee,
+            txid
+        FROM payout_members 
+        WHERE currency_address = $1 
+        AND identity_address IN (SELECT * FROM UNNEST($2::text[]))",
+        currency_address.to_string(),
+        &identity_addresses
+            .iter()
+            .map(|address| address.to_string())
+            .collect::<Vec<_>>(),
+    )
+    .try_map(PayoutMember::try_from)
+    .fetch_all(conn)
+    .await?;
+
+    Ok(values)
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ use vrsc_rpc::json::{Block, ValidationType};
 use crate::coinstaker::constants::{Stake, StakeStatus};
 use crate::database;
 use crate::http::constants::StakingSupply;
+use crate::payout::PayoutMember;
 use crate::util::verus;
 // use crate::util::verus;
 
@@ -130,6 +131,18 @@ impl CoinStaker {
                             .map_or(vec![], |s| vec![s])
                     };
                     if let Err(_) = os_tx.send(staker) {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
+                CoinStakerMessage::GetPayouts(os_tx, identity_addresses) => {
+                    let mut conn = self.pool.acquire().await?;
+                    let payout_members = database::get_payout_members(
+                        &mut conn,
+                        &self.chain_id,
+                        &identity_addresses,
+                    )
+                    .await?;
+                    if let Err(_) = os_tx.send(payout_members) {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -606,4 +619,5 @@ pub enum CoinStakerMessage {
     StakerStatus(oneshot::Sender<String>, Address),
     Balance(oneshot::Sender<f64>),
     GetStaker(oneshot::Sender<Vec<Staker>>, Address, Option<StakerStatus>),
+    GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
 }
