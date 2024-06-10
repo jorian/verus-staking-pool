@@ -142,7 +142,20 @@ impl CoinStaker {
                         &identity_addresses,
                     )
                     .await?;
+
                     if let Err(_) = os_tx.send(payout_members) {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
+                CoinStakerMessage::GetStakes(os_tx, stake_status) => {
+                    let stakes = if let Some(status) = stake_status {
+                        database::get_stakes_by_status(&self.pool, &self.chain_id, status, None)
+                            .await?
+                    } else {
+                        database::get_stakes(&self.pool, &self.chain_id, None).await?
+                    };
+
+                    if let Err(_) = os_tx.send(stakes) {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -154,7 +167,8 @@ impl CoinStaker {
 
     async fn check_maturing_stakes(&self, client: &VerusClient) -> Result<()> {
         let maturing_stakes =
-            database::get_stakes_by_status(&self.pool, StakeStatus::Maturing, None).await?;
+            database::get_stakes_by_status(&self.pool, &self.chain_id, StakeStatus::Maturing, None)
+                .await?;
 
         for mut stake in maturing_stakes {
             let block = client.get_block(&stake.block_hash, 2)?;
@@ -249,7 +263,8 @@ impl CoinStaker {
             });
 
         let maturing_stakes =
-            database::get_stakes_by_status(&self.pool, StakeStatus::Maturing, None).await?;
+            database::get_stakes_by_status(&self.pool, &self.chain_id, StakeStatus::Maturing, None)
+                .await?;
 
         maturing_stakes.iter().for_each(|stake| {
             if payload.contains_key(&stake.found_by) {
@@ -620,4 +635,5 @@ pub enum CoinStakerMessage {
     Balance(oneshot::Sender<f64>),
     GetStaker(oneshot::Sender<Vec<Staker>>, Address, Option<StakerStatus>),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
+    GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),
 }

@@ -4,7 +4,11 @@ use tokio::sync::{mpsc, oneshot};
 use vrsc_rpc::json::vrsc::Address;
 
 use crate::{
-    coinstaker::{coinstaker::CoinStakerMessage, constants::Staker, StakerStatus},
+    coinstaker::{
+        coinstaker::CoinStakerMessage,
+        constants::{Stake, StakeStatus, Staker},
+        StakerStatus,
+    },
     payout::PayoutMember,
 };
 
@@ -73,6 +77,27 @@ pub async fn get_payouts(
     ))
     .await
     .unwrap();
+
+    let res = os_rx.await.unwrap();
+
+    Json(res)
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GetStakesArgs {
+    pub stake_status: Option<StakeStatus>,
+}
+
+#[debug_handler]
+pub async fn get_stakes(
+    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+    Query(args): Query<GetStakesArgs>,
+) -> Json<Vec<Stake>> {
+    let (os_tx, os_rx) = oneshot::channel::<Vec<Stake>>();
+
+    tx.send(CoinStakerMessage::GetStakes(os_tx, args.stake_status))
+        .await
+        .unwrap();
 
     let res = os_rx.await.unwrap();
 

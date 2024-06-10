@@ -276,12 +276,13 @@ pub async fn store_stake(pool: &PgPool, stake: &Stake) -> Result<()> {
 
 pub async fn get_stakes_by_status(
     pool: &PgPool,
+    currency_address: &Address,
     status: StakeStatus,
     from_id: Option<u64>,
 ) -> Result<Vec<Stake>> {
     let rows = sqlx::query_as!(
         DbStake,
-        r#"SELECT 
+        r#"SELECT
             currency_address,
             block_hash,
             block_height,
@@ -292,8 +293,41 @@ pub async fn get_stakes_by_status(
             source_amount,
             status AS "status: _"
         FROM stakes 
-        WHERE status = $1 AND block_height > $2"#,
+        WHERE currency_address = $1 AND 
+            status = $2 AND 
+            block_height > $3"#,
+        currency_address.to_string(),
         status as StakeStatus,
+        from_id.unwrap_or(0) as i64
+    )
+    .try_map(Stake::try_from)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+pub async fn get_stakes(
+    pool: &PgPool,
+    currency_address: &Address,
+    from_id: Option<u64>,
+) -> Result<Vec<Stake>> {
+    let rows = sqlx::query_as!(
+        DbStake,
+        r#"SELECT
+            currency_address,
+            block_hash,
+            block_height,
+            amount,
+            found_by,
+            source_txid,
+            source_vout_num,
+            source_amount,
+            status AS "status: _"
+        FROM stakes 
+        WHERE currency_address = $1 AND 
+            block_height > $2"#,
+        currency_address.to_string(),
         from_id.unwrap_or(0) as i64
     )
     .try_map(Stake::try_from)

@@ -31,6 +31,7 @@ impl Service {
 
         let stakes = database::get_stakes_by_status(
             &self.database,
+            &self.chain_id,
             crate::coinstaker::constants::StakeStatus::Matured,
             Some(last_sync_id),
         )
