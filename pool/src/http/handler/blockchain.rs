@@ -1,9 +1,15 @@
-use axum::{debug_handler, Extension, Json};
+use anyhow::Context;
+use axum::{debug_handler, Extension};
 use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
 use vrsc_rpc::json::vrsc::Address;
 
-use crate::{coinstaker::coinstaker::CoinStakerMessage, http::constants::StakingSupply};
+use crate::{
+    coinstaker::coinstaker::CoinStakerMessage,
+    http::{constants::StakingSupply, handler::AppJson},
+};
+
+use super::AppError;
 
 #[derive(Deserialize, Debug)]
 pub struct Identities {
@@ -15,7 +21,7 @@ pub struct Identities {
 pub async fn staking_supply(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     axum_extra::extract::Query(items): axum_extra::extract::Query<Identities>,
-) -> Json<StakingSupply> {
+) -> Result<AppJson<StakingSupply>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<StakingSupply>();
 
     tx.send(CoinStakerMessage::StakingSupply(
@@ -23,9 +29,9 @@ pub async fn staking_supply(
         items.identity_addresses,
     ))
     .await
-    .unwrap();
+    .context("Could not send Coinstaker message")?;
 
-    let ss = os_rx.await.unwrap();
+    let ss = os_rx.await.context("Sender dropped")?;
 
-    Json(ss)
+    Ok(AppJson(ss))
 }

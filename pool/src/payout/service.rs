@@ -27,7 +27,10 @@ impl Service {
     }
 
     async fn new_payout(&self) -> Result<()> {
-        let last_sync_id = database::get_payout_sync_id(&self.database, &self.chain_id).await?;
+        // TODO can be null at first start
+        let last_sync_id = database::get_payout_sync_id(&self.database, &self.chain_id)
+            .await?
+            .unwrap_or(0);
 
         let stakes = database::get_stakes_by_status(
             &self.database,
@@ -65,14 +68,14 @@ impl Service {
         loop {
             self.new_payout().await?;
 
-            tokio::time::sleep(Duration::from_secs(self.config.interval_in_secs)).await;
+            tokio::time::sleep(Duration::from_secs(self.config.check_interval_in_secs)).await;
         }
     }
 
     async fn keep_sending_payouts(&self) -> Result<()> {
         loop {
             // TODO send payment
-            tokio::time::sleep(Duration::from_secs(self.config.interval_in_secs)).await;
+            tokio::time::sleep(Duration::from_secs(self.config.send_interval_in_secs)).await;
         }
     }
 }

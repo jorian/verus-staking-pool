@@ -20,6 +20,7 @@ pub struct DbStaker {
     pub(super) identity_name: String,
     pub(super) min_payout: i64,
     pub(super) status: StakerStatus,
+    pub(super) fee: Decimal,
 }
 
 impl TryFrom<DbStaker> for Staker {
@@ -34,6 +35,7 @@ impl TryFrom<DbStaker> for Staker {
             identity_name: value.identity_name,
             min_payout: Amount::from_sat(value.min_payout as u64),
             status: value.status,
+            fee: value.fee,
         };
 
         Ok(staker)

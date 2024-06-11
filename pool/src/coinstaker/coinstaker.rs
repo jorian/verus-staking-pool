@@ -536,6 +536,7 @@ impl CoinStaker {
                     identity.fullyqualifiedname.clone(),
                     self.config.min_payout,
                     StakerStatus::CoolingDown,
+                    self.config.fee,
                 );
 
                 database::store_staker(&self.pool, &staker).await?;
@@ -601,6 +602,8 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
             self.check_maturing_stakes(&client).await?;
 
             trace!(%last_height, "Finished doing preflight checks");
+
+            database::update_last_height(&self.pool, &self.chain_id, last_height).await?;
         }
 
         tokio::spawn(super::zmq::tmq_block_listen(

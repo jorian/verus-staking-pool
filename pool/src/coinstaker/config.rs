@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use tracing::debug;
 use url::Url;
@@ -15,7 +16,7 @@ pub struct Config {
     pub chain_id: Address,
     pub pool_address: Address,
     pub pool_primary_address: Address, // R-address stakers should include
-    pub fee: f32,                      // basis points
+    pub fee: Decimal,                  // basis points
     #[serde(with = "as_sat")]
     pub min_payout: Amount,
     #[serde(with = "as_sat")]
@@ -36,8 +37,8 @@ pub struct ChainConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PayoutConfig {
-    pub interval_in_secs: u64,
-    pub pool_address: Address,
+    pub check_interval_in_secs: u64,
+    pub send_interval_in_secs: u64,
 }
 
 impl TryFrom<&ChainConfig> for VerusClient {

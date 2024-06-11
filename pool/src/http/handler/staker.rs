@@ -1,4 +1,5 @@
-use axum::{debug_handler, extract::Query, Extension, Json};
+use anyhow::Context;
+use axum::{debug_handler, extract::Query, Extension};
 use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
 use vrsc_rpc::json::vrsc::Address;
@@ -9,8 +10,11 @@ use crate::{
         constants::{Stake, StakeStatus, Staker},
         StakerStatus,
     },
+    http::handler::AppJson,
     payout::PayoutMember,
 };
+
+use super::AppError;
 
 #[derive(Deserialize, Debug)]
 pub struct StakerStatusArgs {
@@ -21,16 +25,16 @@ pub struct StakerStatusArgs {
 pub async fn staker_status(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<StakerStatusArgs>,
-) -> Json<String> {
+) -> Result<AppJson<String>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<String>();
 
     tx.send(CoinStakerMessage::StakerStatus(os_tx, args.address))
         .await
-        .unwrap();
+        .context("Could not send Coinstaker message")?;
 
-    let res = os_rx.await.unwrap();
+    let res = os_rx.await.context("Sender dropped")?;
 
-    Json(res)
+    Ok(AppJson(res))
 }
 
 #[derive(Deserialize, Debug)]
@@ -43,7 +47,7 @@ pub struct GetStakerArgs {
 pub async fn get_staker(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<GetStakerArgs>,
-) -> Json<Vec<Staker>> {
+) -> Result<AppJson<Vec<Staker>>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<Vec<Staker>>();
 
     tx.send(CoinStakerMessage::GetStaker(
@@ -52,11 +56,11 @@ pub async fn get_staker(
         args.staker_status,
     ))
     .await
-    .unwrap();
+    .context("Could not send Coinstaker message")?;
 
-    let res = os_rx.await.unwrap();
+    let res = os_rx.await.context("Sender dropped")?;
 
-    Json(res)
+    Ok(AppJson(res))
 }
 
 #[derive(Deserialize, Debug)]
@@ -68,7 +72,7 @@ pub struct GetPayoutsArgs {
 pub async fn get_payouts(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<GetPayoutsArgs>,
-) -> Json<Vec<PayoutMember>> {
+) -> Result<AppJson<Vec<PayoutMember>>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<Vec<PayoutMember>>();
 
     tx.send(CoinStakerMessage::GetPayouts(
@@ -76,11 +80,11 @@ pub async fn get_payouts(
         args.identity_addresses,
     ))
     .await
-    .unwrap();
+    .context("Could not send Coinstaker message")?;
 
-    let res = os_rx.await.unwrap();
+    let res = os_rx.await.context("Sender dropped")?;
 
-    Json(res)
+    Ok(AppJson(res))
 }
 
 #[derive(Deserialize, Debug)]
@@ -92,14 +96,14 @@ pub struct GetStakesArgs {
 pub async fn get_stakes(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<GetStakesArgs>,
-) -> Json<Vec<Stake>> {
+) -> Result<AppJson<Vec<Stake>>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<Vec<Stake>>();
 
     tx.send(CoinStakerMessage::GetStakes(os_tx, args.stake_status))
         .await
-        .unwrap();
+        .context("Could not send Coinstaker message")?;
 
-    let res = os_rx.await.unwrap();
+    let res = os_rx.await.context("Sender dropped")?;
 
-    Json(res)
+    Ok(AppJson(res))
 }

@@ -29,7 +29,8 @@ pub async fn store_staker(
         staker.identity_address.to_string(),
         staker.identity_name,
         &staker.status as _,
-        staker.min_payout.as_sat() as i64
+        staker.min_payout.as_sat() as i64,
+        staker.fee
     )
     .execute(pool)
     .await?;
@@ -64,6 +65,7 @@ pub async fn get_stakers_by_identity_address(
             identity_name: row.get("identity_name"),
             min_payout: Amount::from_sat(row.get::<i64, &str>("min_payout") as u64),
             status: row.get::<StakerStatus, &str>("status").try_into().unwrap(),
+            fee: row.get("fee"),
         })
         .collect::<Vec<_>>();
 
@@ -82,7 +84,8 @@ pub async fn get_stakers_by_status(
             identity_address, 
             identity_name, 
             min_payout, 
-            status AS "status: _"
+            status AS "status: _",
+            fee
         FROM stakers 
         WHERE currency_address = $1 
             AND status = $2"#,
@@ -108,7 +111,8 @@ pub async fn get_staker(
             identity_address, 
             identity_name, 
             min_payout, 
-            status AS "status: _"
+            status AS "status: _", 
+            fee
         FROM stakers 
         WHERE currency_address = $1 
             AND identity_address = $2"#,
@@ -394,15 +398,15 @@ pub async fn get_workers_by_round(
     Ok(workers)
 }
 
-pub async fn get_payout_sync_id(pool: &PgPool, currency_address: &Address) -> Result<u64> {
+pub async fn get_payout_sync_id(pool: &PgPool, currency_address: &Address) -> Result<Option<u64>> {
     let value = sqlx::query!(
         "SELECT last_payout_height FROM synchronization WHERE currency_address = $1",
         currency_address.to_string()
     )
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?;
 
-    Ok(value.last_payout_height as u64)
+    Ok(value.map(|row| row.last_payout_height as u64))
 }
 
 pub async fn update_last_payout_height(

@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use vrsc_rpc::{
     bitcoin::{BlockHash, Txid},
@@ -16,6 +17,7 @@ pub struct Staker {
     #[serde(with = "as_sat")]
     pub min_payout: Amount,
     pub status: StakerStatus,
+    pub fee: Decimal, // in basis points
 }
 
 impl Staker {
@@ -25,6 +27,7 @@ impl Staker {
         identity_name: String,
         min_payout: Amount,
         status: StakerStatus,
+        fee: Decimal,
     ) -> Self {
         Self {
             currency_address,
@@ -32,6 +35,7 @@ impl Staker {
             identity_name,
             min_payout,
             status,
+            fee,
         }
     }
 }
