@@ -516,6 +516,7 @@ impl CoinStaker {
                     if self.identity_is_eligible(&identity.identity) == false {
                         trace!(?identity, "a change to this verusid made it inactive");
 
+                        staker.status = StakerStatus::Inactive;
                         database::store_staker(&self.pool, &staker).await?;
                     }
                 }
