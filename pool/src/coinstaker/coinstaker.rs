@@ -118,7 +118,7 @@ impl CoinStaker {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
-                CoinStakerMessage::GetStaker(os_tx, identity_address, staker_status) => {
+                CoinStakerMessage::GetStakers(os_tx, identity_address, staker_status) => {
                     let staker = if let Some(status) = staker_status {
                         database::get_stakers_by_status(&self.pool, &self.chain_id, status)
                             .await?
@@ -365,38 +365,41 @@ impl CoinStaker {
     }
 
     fn identity_is_eligible(&self, identity: &IdentityPrimary) -> bool {
-        // let conditions = &self.config.verus_vault_conditions;
-
-        // general conditions that need to be true regardless of config options
+        // general conditions that need to be true regardless of vault conditions
         if identity.minimumsignatures == 1
             && identity.primaryaddresses.len() > 1
             && identity
                 .primaryaddresses
                 .contains(&self.config.pool_primary_address)
         {
-            debug!(?identity, "identity is eligible");
-
-            return true;
-            // TODO
-            // match identity.flags {
-            //     // fixed time lock; unlock at x seconds (epoch)
-            //     1 => {
-            //         // TODO v2, ineligible until then
-            //         return false;
-            //     }
-            //     // delay lock; unlock after x seconds
-            //     2 => {
-            //         return identity.timelock >= conditions.min_lock as u64
-            //             && identity.primaryaddresses.len()
-            //                 <= conditions.max_primary_addresses.try_into().unwrap_or(0)
-            //             && identity.recoveryauthority != identity.identityaddress
-            //             && identity.revocationauthority != identity.identityaddress
-            //     }
-            //     _ => return false,
-            // }
+            if let Some(conditions) = &self.config.vault_conditions {
+                // check vault conditions
+                if identity.primaryaddresses.len() <= conditions.max_primary_addresses as usize
+                    && if conditions.strict_recovery_id {
+                        identity.recoveryauthority != identity.identityaddress
+                            && identity.revocationauthority != identity.identityaddress
+                    } else {
+                        true
+                    }
+                {
+                    match identity.flags {
+                        0 => {
+                            // no time lock set
+                            return true;
+                        }
+                        // fixed time lock; unlock at x seconds (epoch)
+                        1 => {
+                            // TODO v2, ineligible until then
+                            return false;
+                        }
+                        // delay lock; unlock after x seconds
+                        2 => return identity.timelock >= conditions.min_time_lock as u64,
+                        _ => return false,
+                    }
+                }
+            }
         }
 
-        // TODO notify an admin if identity was checked but not eligible
         false
     }
 
@@ -636,7 +639,7 @@ pub enum CoinStakerMessage {
     StakingSupply(oneshot::Sender<StakingSupply>, Vec<Address>),
     StakerStatus(oneshot::Sender<String>, Address),
     Balance(oneshot::Sender<f64>),
-    GetStaker(oneshot::Sender<Vec<Staker>>, Address, Option<StakerStatus>),
+    GetStakers(oneshot::Sender<Vec<Staker>>, Address, Option<StakerStatus>),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
     GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),
 }

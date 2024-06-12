@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use rust_decimal::Decimal;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 use url::Url;
 use vrsc_rpc::{
@@ -21,6 +21,7 @@ pub struct Config {
     pub min_payout: Amount,
     #[serde(with = "as_sat")]
     pub tx_fee: Amount,
+    pub vault_conditions: Option<VaultConditions>,
     pub webhook_endpoints: Vec<Url>,
     pub chain_config: ChainConfig,
     pub payout_config: PayoutConfig,
@@ -33,6 +34,42 @@ pub struct ChainConfig {
     pub rpc_host: String,
     pub rpc_port: u16,
     pub zmq_port_blocknotify: u16,
+}
+
+/// Sets the conditions a VerusID must adhere to before being accepted as a staker in this pool.
+///
+/// There are a couple of conditions that a VerusID requires, regardless of these VaultConditions.
+/// - There must be at least 2 primary addresses,
+/// - One of the primary addresses must be this pool's staking address
+/// - The minimum_signatures of a VerusID must be set to 1. The VerusID does not stake if it's a
+/// multisig.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct VaultConditions {
+    /// Defines the minimal locktime for the VerusID to be eligible.
+    ///
+    /// Note that VerusID supports two types of locking, absolute lock and relative lock.
+    /// A fixed (absolute) time in the future can be set, by setting min_time_lock to a Unix time
+    /// in the future, or set a (relative) unlock window of X blocks that starts ticking down
+    /// when a VerusID is unlocked.
+    ///
+    /// A VerusID is unlocked when the min_time_lock is 0.
+    pub min_time_lock: u32,
+    /// When set to true, the Revoke and Recover authority must be different
+    /// from the main VerusID.
+    pub strict_recovery_id: bool,
+    /// Defines how many primary addresses are allowed to exist in the VerusID.
+    pub max_primary_addresses: u8,
+}
+
+impl Default for VaultConditions {
+    fn default() -> Self {
+        Self {
+            min_time_lock: 0,
+            strict_recovery_id: false,
+            max_primary_addresses: 64,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

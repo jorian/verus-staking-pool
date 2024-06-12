@@ -44,13 +44,13 @@ pub struct GetStakerArgs {
 }
 
 #[debug_handler]
-pub async fn get_staker(
+pub async fn get_stakers(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<GetStakerArgs>,
 ) -> Result<AppJson<Vec<Staker>>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<Vec<Staker>>();
 
-    tx.send(CoinStakerMessage::GetStaker(
+    tx.send(CoinStakerMessage::GetStakers(
         os_tx,
         args.identity_address,
         args.staker_status,
