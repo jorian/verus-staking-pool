@@ -314,7 +314,7 @@ pub async fn get_stakes_by_status(
 pub async fn get_stakes(
     pool: &PgPool,
     currency_address: &Address,
-    from_id: Option<u64>,
+    from_height: Option<u64>,
 ) -> Result<Vec<Stake>> {
     let rows = sqlx::query_as!(
         DbStake,
@@ -332,7 +332,7 @@ pub async fn get_stakes(
         WHERE currency_address = $1 AND 
             block_height > $2"#,
         currency_address.to_string(),
-        from_id.unwrap_or(0) as i64
+        from_height.unwrap_or(0) as i64
     )
     .try_map(Stake::try_from)
     .fetch_all(pool)

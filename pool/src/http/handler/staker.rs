@@ -2,12 +2,13 @@ use anyhow::Context;
 use axum::{debug_handler, extract::Query, Extension};
 use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
+use tracing::debug;
 use vrsc_rpc::json::vrsc::Address;
 
 use crate::{
     coinstaker::{
         coinstaker::CoinStakerMessage,
-        constants::{Stake, StakeStatus, Staker},
+        constants::{Stake, StakeStatus, Staker, StakerBalance},
         StakerStatus,
     },
     http::handler::AppJson,
@@ -104,6 +105,27 @@ pub async fn get_stakes(
         .context("Could not send Coinstaker message")?;
 
     let res = os_rx.await.context("Sender dropped")?;
+
+    Ok(AppJson(res))
+}
+
+pub async fn get_staker_balance(
+    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+    Query(args): Query<Vec<(String, Address)>>,
+) -> Result<AppJson<Vec<(Address, StakerBalance)>>, AppError> {
+    dbg!(&args);
+    let (os_tx, os_rx) = oneshot::channel::<Vec<(Address, StakerBalance)>>();
+
+    let args = args.into_iter().map(|arg| arg.1).collect::<Vec<_>>();
+
+    tx.send(CoinStakerMessage::GetStakerBalance(os_tx, args))
+        .await
+        .context("Could not send Coinstaker message")?;
+
+    let map = os_rx.await.context("Sender dropped")?;
+    let res = map.into_iter().map(|(k, v)| (k, v)).collect();
+
+    debug!("{:?}", &res);
 
     Ok(AppJson(res))
 }

@@ -23,7 +23,7 @@ use crate::util::verus;
 // use crate::util::verus;
 
 use super::config::Config as CoinstakerConfig;
-use super::constants::Staker;
+use super::constants::{Staker, StakerBalance};
 use super::StakerStatus;
 pub struct CoinStaker {
     pool: PgPool,
@@ -59,6 +59,7 @@ impl CoinStaker {
 
     async fn listen(&mut self) -> Result<()> {
         trace!("listening for messages");
+
         while let Some(msg) = self.rx.recv().await {
             match msg {
                 CoinStakerMessage::Block(block_hash) => {
@@ -111,13 +112,7 @@ impl CoinStaker {
                         .send("success".to_string())
                         .expect("a oneshot message failed to send");
                 }
-                CoinStakerMessage::Balance(os_tx) => {
-                    let balance = self.verusd()?.get_balance(None, None)?;
 
-                    if let Err(_) = os_tx.send(balance.as_vrsc()) {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
                 CoinStakerMessage::GetStakers(os_tx, identity_address, staker_status) => {
                     let staker = if let Some(status) = staker_status {
                         database::get_stakers_by_status(&self.pool, &self.chain_id, status)
@@ -159,6 +154,38 @@ impl CoinStaker {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
+                CoinStakerMessage::GetStakerBalance(os_tx, identity_addresses) => {
+                    let mut conn = self.pool.acquire().await?;
+                    let payout_members = database::get_payout_members(
+                        &mut conn,
+                        &self.chain_id,
+                        &identity_addresses,
+                    )
+                    .await?;
+
+                    debug!(?payout_members);
+
+                    let mut hm = HashMap::new();
+
+                    for pm in payout_members {
+                        hm.entry(pm.identity_address.clone())
+                            .and_modify(|bal: &mut StakerBalance| {
+                                if pm.txid.is_none() {
+                                    bal.pending += pm.reward
+                                } else {
+                                    bal.paid += pm.reward
+                                }
+                            })
+                            .or_insert(StakerBalance::from(pm));
+                    }
+
+                    debug!("{:?}", hm);
+                    if let Err(_) =
+                        os_tx.send(hm.drain().collect::<Vec<(Address, StakerBalance)>>())
+                    {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
             }
         }
 
@@ -176,8 +203,10 @@ impl CoinStaker {
             if block.confirmations < 0 {
                 trace!(?stake, "stake is stale");
 
+                database::move_work_to_round_zero(&self.pool, &self.chain_id, block.height).await?;
                 stake.status = StakeStatus::Stale;
                 database::store_stake(&self.pool, &stake).await?;
+
                 // TODO send webhook message
 
                 return Ok(());
@@ -397,6 +426,8 @@ impl CoinStaker {
                         _ => return false,
                     }
                 }
+            } else {
+                return true;
             }
         }
 
@@ -547,6 +578,8 @@ impl CoinStaker {
                 trace!("new staker stored in database.");
 
                 // TODO self.webhooks.send(activated)
+            } else {
+                trace!("verusid not eligible");
             }
             // if the staker does not yet exist, we should check if it contains
             // the primary address of the pool
@@ -639,8 +672,8 @@ pub enum CoinStakerMessage {
     Block(BlockHash),
     StakingSupply(oneshot::Sender<StakingSupply>, Vec<Address>),
     StakerStatus(oneshot::Sender<String>, Address),
-    Balance(oneshot::Sender<f64>),
     GetStakers(oneshot::Sender<Vec<Staker>>, Address, Option<StakerStatus>),
+    GetStakerBalance(oneshot::Sender<Vec<(Address, StakerBalance)>>, Vec<Address>),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
     GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),
 }

@@ -9,6 +9,8 @@ use vrsc_rpc::{
     },
 };
 
+use crate::payout::PayoutMember;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Staker {
     pub currency_address: Address,
@@ -103,11 +105,36 @@ impl Stake {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "stake_status", rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "snake_case")]
 pub enum StakeStatus {
     Maturing,
     Matured,
     Stale,
     StakeGuard,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StakerBalance {
+    #[serde(with = "as_sat")]
+    pub paid: Amount, // payoutmembers with a txid
+    #[serde(with = "as_sat")]
+    pub pending: Amount, // payoutmembers without a txid
+}
+
+impl From<PayoutMember> for StakerBalance {
+    fn from(value: PayoutMember) -> Self {
+        if value.txid.is_some() {
+            StakerBalance {
+                paid: value.reward,
+                pending: Amount::ZERO,
+            }
+        } else {
+            StakerBalance {
+                paid: Amount::ZERO,
+                pending: value.reward,
+            }
+        }
+    }
 }
 
 #[allow(unused)]

@@ -51,7 +51,7 @@ CREATE TABLE stakes (
 
 CREATE TABLE synchronization (
     currency_address TEXT NOT NULL,
-    last_height bigint NOT NULL,
+    last_height bigint NOT NULL DEFAULT 0,
     last_payout_height BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
