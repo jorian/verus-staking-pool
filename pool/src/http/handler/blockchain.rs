@@ -4,10 +4,9 @@ use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
 use vrsc_rpc::json::vrsc::Address;
 
-use crate::{
-    coinstaker::coinstaker::CoinStakerMessage,
-    http::{constants::StakingSupply, handler::AppJson},
-};
+use crate::coinstaker::coinstaker::CoinStakerMessage;
+use crate::http::constants::StakingSupply;
+use crate::http::handler::AppJson;
 
 use super::AppError;
 
