@@ -30,7 +30,7 @@ pub fn router(controller: Arc<Controller>) -> axum::Router {
 
     axum::Router::new()
         .nest(
-            &base_path(),
+            base_path(),
             main_router(state.clone()).nest("/currency", currency_router(state)),
         )
         .layer(

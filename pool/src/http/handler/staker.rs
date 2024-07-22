@@ -123,9 +123,8 @@ pub async fn get_staker_balance(
         .context("Could not send Coinstaker message")?;
 
     let map = os_rx.await.context("Sender dropped")?;
-    let res = map.into_iter().map(|(k, v)| (k, v)).collect();
 
-    debug!("{:?}", &res);
+    debug!("{:?}", &map);
 
-    Ok(AppJson(res))
+    Ok(AppJson(map))
 }

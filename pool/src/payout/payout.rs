@@ -99,7 +99,7 @@ impl Payout {
         debug!("initial amount: {}", stake.amount.as_sat());
 
         // the difference is added to the pool fee
-        if let Some(fee) = stake.amount.clone().checked_sub(reward_sum) {
+        if let Some(fee) = stake.amount.checked_sub(reward_sum) {
             if fee > Amount::ZERO {
                 trace!(
                         "pool_fee: there is a difference of {pool_fee} between the staked amount and the amount to pay out"
@@ -111,7 +111,7 @@ impl Payout {
 
         Ok(Self {
             currency_address: stake.currency_address.clone(),
-            block_hash: stake.block_hash.clone(),
+            block_hash: stake.block_hash,
             block_height: stake.block_height,
             total_work: sum_of_shares,
             amount: stake.amount,

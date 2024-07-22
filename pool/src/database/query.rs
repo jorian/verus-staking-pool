@@ -63,7 +63,7 @@ pub async fn get_stakers_by_identity_address(
             identity_address: Address::from_str(row.get("identity_address")).unwrap(),
             identity_name: row.get("identity_name"),
             min_payout: Amount::from_sat(row.get::<i64, &str>("min_payout") as u64),
-            status: row.get::<StakerStatus, &str>("status").try_into().unwrap(),
+            status: row.get::<StakerStatus, &str>("status"),
             fee: row.get("fee"),
         })
         .collect::<Vec<_>>();
@@ -472,7 +472,7 @@ pub async fn store_payout_member(
 pub async fn get_payout_members(
     conn: &mut PgConnection,
     currency_address: &Address,
-    identity_addresses: &Vec<Address>,
+    identity_addresses: &[Address],
 ) -> Result<Vec<PayoutMember>> {
     let values = sqlx::query_as!(
         DbPayoutMember,

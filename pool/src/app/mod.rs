@@ -73,14 +73,14 @@ impl App {
 
             for cs in coin_stakers {
                 s.start(SubsystemBuilder::new(
-                    format!("CoinStakerService.{}", cs.chain_id.to_string()),
+                    format!("CoinStakerService.{}", cs.chain_id),
                     cs.into_subsystem(),
                 ));
             }
 
             for (name, payout) in coin_staker_payouts {
                 s.start(SubsystemBuilder::new(
-                    format!("CoinStakerPayoutService.{}", name.to_string()),
+                    format!("CoinStakerPayoutService.{name}"),
                     payout.into_subsystem(),
                 ));
             }

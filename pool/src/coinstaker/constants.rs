@@ -3,10 +3,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use vrsc_rpc::{
     bitcoin::{BlockHash, Txid},
-    json::{
-        vrsc::{util::amount::serde::as_sat, Address, Amount},
-        Block,
-    },
+    json::vrsc::{util::amount::serde::as_sat, Address, Amount},
 };
 
 use crate::payout::PayoutMember;
@@ -91,7 +88,7 @@ impl Stake {
     ) -> Self {
         Self {
             currency_address: currency_address.clone(),
-            block_hash: block_hash.clone(),
+            block_hash: *block_hash,
             block_height,
             found_by: found_by.clone(),
             source_txid,
@@ -137,40 +134,40 @@ impl From<PayoutMember> for StakerBalance {
     }
 }
 
-#[allow(unused)]
-fn block() -> Block {
-    let block = Block {
-        hash: todo!(),
-        validation_type: todo!(),
-        postarget: todo!(),
-        poshashbh: todo!(),
-        poshashtx: todo!(),
-        possourcetxid: todo!(),
-        possourcevoutnum: todo!(),
-        posrewarddest: todo!(),
-        postxddest: todo!(),
-        confirmations: todo!(),
-        size: todo!(),
-        height: todo!(),
-        version: todo!(),
-        merkle_root: todo!(),
-        seg_id: todo!(),
-        final_sapling_root: todo!(),
-        tx: todo!(),
-        time: todo!(),
-        nonce: todo!(),
-        solution: todo!(),
-        bits: todo!(),
-        difficulty: todo!(),
-        chain_work: todo!(),
-        chain_stake: todo!(),
-        anchor: todo!(),
-        block_type: todo!(),
-        value_pools: todo!(),
-        previous_blockhash: todo!(),
-        next_blockhash: todo!(),
-        proofroot: todo!(),
-    };
+// #[allow(unused)]
+// fn block() -> Block {
+//     let block = Block {
+//         hash: todo!(),
+//         validation_type: todo!(),
+//         postarget: todo!(),
+//         poshashbh: todo!(),
+//         poshashtx: todo!(),
+//         possourcetxid: todo!(),
+//         possourcevoutnum: todo!(),
+//         posrewarddest: todo!(),
+//         postxddest: todo!(),
+//         confirmations: todo!(),
+//         size: todo!(),
+//         height: todo!(),
+//         version: todo!(),
+//         merkle_root: todo!(),
+//         seg_id: todo!(),
+//         final_sapling_root: todo!(),
+//         tx: todo!(),
+//         time: todo!(),
+//         nonce: todo!(),
+//         solution: todo!(),
+//         bits: todo!(),
+//         difficulty: todo!(),
+//         chain_work: todo!(),
+//         chain_stake: todo!(),
+//         anchor: todo!(),
+//         block_type: todo!(),
+//         value_pools: todo!(),
+//         previous_blockhash: todo!(),
+//         next_blockhash: todo!(),
+//         proofroot: todo!(),
+//     };
 
-    block
-}
+//     block
+// }

@@ -99,7 +99,7 @@ impl CoinStaker {
                 CoinStakerMessage::StakingSupply(os_tx, identity_addresses) => {
                     let res = self.get_staking_supply(identity_addresses).await?;
 
-                    if let Err(_) = os_tx.send(res) {
+                    if os_tx.send(res).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -125,7 +125,7 @@ impl CoinStaker {
                             .await?
                             .map_or(vec![], |s| vec![s])
                     };
-                    if let Err(_) = os_tx.send(staker) {
+                    if os_tx.send(staker).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -138,7 +138,7 @@ impl CoinStaker {
                     )
                     .await?;
 
-                    if let Err(_) = os_tx.send(payout_members) {
+                    if os_tx.send(payout_members).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -150,7 +150,7 @@ impl CoinStaker {
                         database::get_stakes(&self.pool, &self.chain_id, None).await?
                     };
 
-                    if let Err(_) = os_tx.send(stakes) {
+                    if os_tx.send(stakes).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -180,8 +180,9 @@ impl CoinStaker {
                     }
 
                     debug!("{:?}", hm);
-                    if let Err(_) =
-                        os_tx.send(hm.drain().collect::<Vec<(Address, StakerBalance)>>())
+                    if os_tx
+                        .send(hm.drain().collect::<Vec<(Address, StakerBalance)>>())
+                        .is_err()
                     {
                         Err(anyhow!("the sender dropped"))?
                     }
@@ -259,7 +260,7 @@ impl CoinStaker {
     ///
     /// An exception is made when an UTXO is cooling down after mining a block
     /// for the staking pool. It is still counted towards work.
-    async fn add_work(&self, active_stakers: &Vec<Staker>, blockheight: u64) -> Result<()> {
+    async fn add_work(&self, active_stakers: &[Staker], blockheight: u64) -> Result<()> {
         let verus_client = self.verusd()?;
 
         let active_staker_addresses = active_stakers
@@ -317,7 +318,7 @@ impl CoinStaker {
         block_hash: &BlockHash,
         active_stakers: &Vec<Staker>,
     ) -> Result<()> {
-        if let Some(stake) = self.is_stake(&block_hash).await? {
+        if let Some(stake) = self.is_stake(block_hash).await? {
             debug!(?stake, "!!!!! STAKE FOUND !!!!!");
 
             database::store_new_stake(&self.pool, &stake).await?;
@@ -351,8 +352,7 @@ impl CoinStaker {
 
             let coinbase_value = block
                 .tx
-                .iter()
-                .next()
+                .first()
                 .context("there should always be a coinbase transaction")?
                 .vout
                 .first()
@@ -454,7 +454,7 @@ impl CoinStaker {
         let identity_addresses = stakers
             .into_iter()
             .filter(|s| {
-                let is_subscribed = &s.status == &StakerStatus::Active;
+                let is_subscribed = s.status == StakerStatus::Active;
                 let is_cooled_down = if let Ok(identity) =
                     verus_client.get_identity_history(&s.identity_address.to_string(), 0, 9999999)
                 {
@@ -480,7 +480,7 @@ impl CoinStaker {
         for tx in &block.tx {
             for vout in &tx.vout {
                 if let Some(identity_primary) = &vout.script_pubkey.identityprimary {
-                    self.check_staker_status(&verus_client, &identity_primary.identityaddress)
+                    self.check_staker_status(verus_client, &identity_primary.identityaddress)
                         .await?;
                 }
             }
@@ -526,7 +526,7 @@ impl CoinStaker {
 
             match staker.status {
                 StakerStatus::Active => {
-                    if self.identity_is_eligible(&identity.identity) == false {
+                    if !self.identity_is_eligible(&identity.identity) {
                         trace!(?identity, "a change to this verusid made it inactive");
                         staker.status = StakerStatus::Inactive;
                         database::store_staker(&self.pool, &staker).await?;
@@ -544,7 +544,7 @@ impl CoinStaker {
                 }
                 StakerStatus::CoolingDown => {
                     // an update was made to a staker that was already cooling down.
-                    if self.identity_is_eligible(&identity.identity) == false {
+                    if !self.identity_is_eligible(&identity.identity) {
                         trace!(?identity, "a change to this verusid made it inactive");
 
                         staker.status = StakerStatus::Inactive;
@@ -617,7 +617,7 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
         // some preflight checks are needed:
 
         // if daemon is not staking, the work will not be counted towards shares
-        if client.get_mining_info()?.staking == false {
+        if !client.get_mining_info()?.staking {
             warn!("daemon is not staking, staker work will not be accumulated");
         }
 
@@ -628,7 +628,7 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
             last_height += 1;
             let chain_tip = client.get_blockchain_info()?.blocks;
 
-            for i in last_height.try_into()?..=chain_tip {
+            for i in last_height..=chain_tip {
                 let block = client.get_block_by_height(i, 2)?;
 
                 self.check_stakers(&client, &block).await?;
@@ -655,10 +655,7 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
             },
             r = self.listen() => {
                 warn!("stopped listening");
-                match r {
-                    Err(e) => error!("{e:?}"),
-                    _ => {}
-                }
+                if let Err(e) = r { error!("{e:?}") }
             },
 
         }

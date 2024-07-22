@@ -84,8 +84,8 @@ impl TryFrom<&ChainConfig> for VerusClient {
     fn try_from(value: &ChainConfig) -> Result<VerusClient> {
         VerusClient::rpc(vrsc_rpc::Auth::UserPass(
             format!("{}:{}", value.rpc_host, value.rpc_port),
-            format!("{}", value.rpc_user),
-            format!("{}", value.rpc_password),
+            value.rpc_user.to_string(),
+            value.rpc_password.to_string(),
         ))
         .context(format!(
             "Could not make Verus client for config:\n{:#?}",
