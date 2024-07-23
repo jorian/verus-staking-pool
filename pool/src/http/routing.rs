@@ -64,6 +64,7 @@ pub fn main_router(state: AppState) -> axum::Router {
 
 pub fn currency_router(state: AppState) -> axum::Router {
     axum::Router::new()
+        .route("/:currency/pooladdress", get(handler::app::pool_address))
         .route(
             "/:currency/stakingsupply",
             get(handler::blockchain::staking_supply),
@@ -77,8 +78,8 @@ pub fn currency_router(state: AppState) -> axum::Router {
             "/:currency/stakerbalance",
             get(handler::staker::get_staker_balance),
         )
-        .route("/:currency/stake", get(handler::staker::get_stakes))
-        .route("/:currency/payout", get(handler::staker::get_payouts))
+        .route("/:currency/stake", get(handler::stake::get_stakes))
+        .route("/:currency/payout", get(handler::payout::get_payouts))
         .route_layer(middleware::from_fn_with_state(state.clone(), my_middleware))
         .with_state(state)
 }

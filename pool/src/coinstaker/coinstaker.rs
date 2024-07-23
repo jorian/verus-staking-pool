@@ -20,7 +20,6 @@ use crate::database;
 use crate::http::constants::StakingSupply;
 use crate::payout::PayoutMember;
 use crate::util::verus;
-// use crate::util::verus;
 
 use super::config::Config as CoinstakerConfig;
 use super::constants::{Staker, StakerBalance};
@@ -179,11 +178,17 @@ impl CoinStaker {
                             .or_insert(StakerBalance::from(pm));
                     }
 
-                    debug!("{:?}", hm);
                     if os_tx
                         .send(hm.drain().collect::<Vec<(Address, StakerBalance)>>())
                         .is_err()
                     {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
+                CoinStakerMessage::PoolPrimaryAddress(os_tx) => {
+                    let pool_address = self.config.pool_primary_address.to_string();
+
+                    if os_tx.send(pool_address).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -579,7 +584,7 @@ impl CoinStaker {
 
                 // TODO self.webhooks.send(activated)
             } else {
-                trace!("verusid not eligible");
+                trace!(id = &identity.fullyqualifiedname, "verusid not eligible");
             }
             // if the staker does not yet exist, we should check if it contains
             // the primary address of the pool
@@ -673,4 +678,5 @@ pub enum CoinStakerMessage {
     GetStakerBalance(oneshot::Sender<Vec<(Address, StakerBalance)>>, Vec<Address>),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
     GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),
+    PoolPrimaryAddress(oneshot::Sender<String>),
 }
