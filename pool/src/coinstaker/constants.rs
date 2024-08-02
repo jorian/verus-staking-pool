@@ -6,7 +6,7 @@ use vrsc_rpc::{
     json::vrsc::{util::amount::serde::as_sat, Address, Amount},
 };
 
-use crate::payout::PayoutMember;
+use crate::payout_service::PayoutMember;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Staker {

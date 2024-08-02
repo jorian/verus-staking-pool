@@ -67,7 +67,6 @@ pub async fn get_staker_balance(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<Vec<(String, Address)>>,
 ) -> Result<AppJson<Vec<(Address, StakerBalance)>>, AppError> {
-    dbg!(&args);
     let (os_tx, os_rx) = oneshot::channel::<Vec<(Address, StakerBalance)>>();
 
     let args = args.into_iter().map(|arg| arg.1).collect::<Vec<_>>();

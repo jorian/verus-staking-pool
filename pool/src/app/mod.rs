@@ -1,14 +1,19 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use crate::{
     coinstaker::{
+        self,
         coinstaker::{CoinStaker, CoinStakerMessage},
         get_coin_configurations,
     },
     config::Config,
     controller::Controller,
     http::HttpService,
-    payout,
+    payout_service,
 };
 use anyhow::Result;
 use secrecy::ExposeSecret;
@@ -48,7 +53,7 @@ impl App {
                 CoinStaker::new(self.pool.clone(), chain_config.clone(), tx.clone(), rx)?;
             coin_stakers.push(coin_staker);
 
-            let payout = payout::Service::new(
+            let payout = payout_service::Service::new(
                 chain_config.payout_config,
                 self.pool.clone(),
                 chain_id.clone(),
@@ -106,6 +111,23 @@ impl App {
     }
 
     pub fn services(self) -> Result<Toplevel> {
-        Ok(Toplevel::new(|_| async move {}))
+        let pool = self.pool.clone();
+
+        let (tx, rx) = mpsc::channel(128);
+
+        let config_path: PathBuf = "coin_configs/vrsctest.toml".into();
+        let config = config::Config::builder()
+            .add_source(config::File::from(config_path.as_path()))
+            .build()?
+            .try_deserialize::<coinstaker::Config>()?;
+
+        let coinstaker = CoinStaker::new(pool, config, tx, rx)?;
+
+        Ok(Toplevel::new(|toplevel| async move {
+            toplevel.start(SubsystemBuilder::new(
+                "mock".to_string(),
+                coinstaker.into_subsystem(),
+            ));
+        }))
     }
 }

@@ -1,16 +1,28 @@
 use std::time::Duration;
 
 use pool::{app::App, config::app_config};
-use tracing::{info, trace};
-use tracing_subscriber::EnvFilter;
+use tracing::{debug, info, trace, Level};
+use tracing_subscriber::{
+    fmt::{self, writer::MakeWriterExt},
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+    EnvFilter,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt()
-        .with_file(true)
-        .with_line_number(true)
-        .with_env_filter(EnvFilter::from_default_env())
-        .compact()
+    let filter_layer = EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("info"))?;
+
+    let file_appender = tracing_appender::rolling::hourly("./logs", "error");
+
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt::Layer::default())
+        .with(
+            fmt::Layer::new()
+                .json()
+                .with_writer(file_appender.with_min_level(Level::DEBUG)),
+        )
         .init();
 
     trace!("logging enabled");

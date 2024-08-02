@@ -38,7 +38,12 @@ tmq = { version = "0.4.0" }
 zmq = { version = "0.10.0" }
 
 tracing = "0.1.40"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "json",
+    "std",
+] }
+tracing-appender = "0.2.3"
 
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"

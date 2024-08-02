@@ -7,7 +7,7 @@ use vrsc_rpc::json::vrsc::Address;
 use crate::{
     coinstaker::coinstaker::CoinStakerMessage,
     http::handler::{AppError, AppJson},
-    payout::PayoutMember,
+    payout_service::PayoutMember,
 };
 
 #[derive(Deserialize, Debug)]

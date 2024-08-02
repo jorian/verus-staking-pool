@@ -64,38 +64,44 @@ impl Service {
         Ok(())
     }
 
-    async fn keep_creating_payouts(&self) -> Result<()> {
-        loop {
-            self.new_payout().await?;
+    async fn keep_creating_payouts(&self, subsys: &SubsystemHandle) -> Result<()> {
+        while !subsys.is_shutdown_requested() {
+            if let Err(e) = self.new_payout().await {
+                error!(error = ?e, "Failed to create new payout");
+            }
 
-            tokio::time::sleep(Duration::from_secs(self.config.check_interval_in_secs)).await;
+            tokio::select! {
+                _ = subsys.on_shutdown_requested() => {},
+                _ = tokio::time::sleep(Duration::from_secs(self.config.check_interval_in_secs)) => {}
+            }
         }
+
+        Ok(())
     }
 
-    async fn keep_sending_payouts(&self) -> Result<()> {
-        loop {
+    async fn keep_sending_payments(&self, subsys: &SubsystemHandle) -> Result<()> {
+        while !subsys.is_shutdown_requested() {
             // TODO send payment
-            tokio::time::sleep(Duration::from_secs(self.config.send_interval_in_secs)).await;
+
+            // get unsent payments
+
+            tokio::select! {
+                _ = subsys.on_shutdown_requested() => {},
+                _ = tokio::time::sleep(Duration::from_secs(self.config.send_interval_in_secs)) => {}
+            }
         }
+
+        Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl IntoSubsystem<anyhow::Error> for Service {
     async fn run(self, subsys: SubsystemHandle) -> Result<()> {
-        while !subsys.is_shutdown_requested() {
-            tokio::select! {
-                _ = subsys.on_shutdown_requested() => {
-                    info!("PayoutService shutting down")
-                }
-                Err(e) = self.keep_creating_payouts() => {
-                    error!("An error occured while doing payouts: {:?}", e);
-                }
-                Err(e) = self.keep_sending_payouts() => {
-                    error!("An error occured while sending payouts: {:?}", e);
-                }
-            }
-        }
+        tokio::try_join!(
+            self.keep_creating_payouts(&subsys),
+            self.keep_sending_payments(&subsys)
+        )?;
 
         Ok(())
     }

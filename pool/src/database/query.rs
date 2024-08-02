@@ -12,7 +12,7 @@ use super::constants::{DbPayoutMember, DbWorker};
 use crate::coinstaker::constants::{Stake, StakeStatus, Staker};
 use crate::coinstaker::StakerStatus;
 use crate::database::constants::{DbStake, DbStaker};
-use crate::payout::{Payout, PayoutMember, Worker};
+use crate::payout_service::{Payout, PayoutMember, Worker};
 
 #[allow(unused)]
 pub async fn store_staker(
@@ -160,6 +160,7 @@ pub async fn store_work(
 
 // used when a stake was found to be stale or stolen. Work that was assigned to a round
 // before, should be moved back to round 0.
+// rename: undo_work
 pub async fn move_work_to_round_zero(
     pool: &PgPool,
     currency_address: &Address,

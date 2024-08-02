@@ -18,15 +18,17 @@ use vrsc_rpc::json::{Block, ValidationType};
 use crate::coinstaker::constants::{Stake, StakeStatus};
 use crate::database;
 use crate::http::constants::StakingSupply;
-use crate::payout::PayoutMember;
+use crate::payout_service::PayoutMember;
 use crate::util::verus;
 
 use super::config::Config as CoinstakerConfig;
 use super::constants::{Staker, StakerBalance};
 use super::StakerStatus;
+
+#[derive(Debug)]
 pub struct CoinStaker {
     pool: PgPool,
-    config: CoinstakerConfig,
+    pub config: CoinstakerConfig,
     tx: mpsc::Sender<CoinStakerMessage>,
     rx: mpsc::Receiver<CoinStakerMessage>,
     pub chain_id: Address,
@@ -56,14 +58,14 @@ impl CoinStaker {
         Ok(verus_client)
     }
 
+    #[instrument(skip(self), fields(coin = self.config.chain_name))]
     async fn listen(&mut self) -> Result<()> {
         trace!("listening for messages");
 
         while let Some(msg) = self.rx.recv().await {
+            trace!(?msg, "received new ZMQ message");
             match msg {
                 CoinStakerMessage::Block(block_hash) => {
-                    info!(?block_hash, "received new block");
-
                     // 1. check subscription of currenctly active subscribers.
                     // 2. check if any pending stakes have matured
                     // 3. check if daemon is staking
@@ -71,6 +73,7 @@ impl CoinStaker {
                     // 5. check if the current block hash is a stake (this moves work until now into pending stake)
                     let verus_client = self.verusd()?;
                     let block = verus_client.get_block(&block_hash, 2)?;
+                    info!(?block_hash, height = %block.height, "received new block");
                     // if a staker leaves this round, a last round of work needs to be added to his address,
                     // as he still could have staked this round's block, he needs to be counted
                     // in add_work()
@@ -207,7 +210,7 @@ impl CoinStaker {
             let block = client.get_block(&stake.block_hash, 2)?;
 
             if block.confirmations < 0 {
-                trace!(?stake, "stake is stale");
+                trace!(block_hash = %block.hash, height = %block.height, amount = %stake.amount.as_vrsc(), "stake is stale");
 
                 database::move_work_to_round_zero(&self.pool, &self.chain_id, block.height).await?;
                 stake.status = StakeStatus::Stale;
@@ -230,9 +233,9 @@ impl CoinStaker {
                     return Ok(());
                 }
 
-                trace!(?stake, "stake still maturing");
+                trace!(block_hash = %block.hash, height = %block.height, amount = %stake.amount.as_vrsc(), "stake still maturing");
             } else {
-                trace!(?stake, "stake has matured");
+                trace!(block_hash = %block.hash, height = %block.height, amount = %stake.amount.as_vrsc(), "stake has matured");
 
                 stake.status = StakeStatus::Matured;
                 database::store_stake(&self.pool, &stake).await?;
@@ -303,10 +306,12 @@ impl CoinStaker {
 
         maturing_stakes.iter().for_each(|stake| {
             if payload.contains_key(&stake.found_by) {
-                trace!("adding work to staker to undo punishment (cooling down utxo after stake)");
                 payload.entry(stake.found_by.clone()).and_modify(|v| {
-                    debug!("source_amount: {}", stake.source_amount.as_sat() as i64);
-                    debug!("sum: {}", v);
+                    debug!(
+                        amount_to_add = %stake.source_amount.as_vrsc(),
+                        staker = %stake.found_by,
+                        "count work of maturing stake"
+                    );
                     *v += Decimal::from_i64(stake.source_amount.as_sat() as i64).unwrap()
                 });
             }
@@ -613,6 +618,7 @@ async fn check_stake_guard(block: &Block) -> Result<bool> {
     Ok(false)
 }
 
+#[cfg(not(feature = "mock"))]
 #[async_trait]
 impl IntoSubsystem<anyhow::Error> for CoinStaker {
     async fn run(mut self, subsys: SubsystemHandle) -> Result<()> {
@@ -623,7 +629,7 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
 
         // if daemon is not staking, the work will not be counted towards shares
         if !client.get_mining_info()?.staking {
-            warn!("daemon is not staking, staker work will not be accumulated");
+            warn!(coin = %self.config.chain_name, "daemon is not staking, staker work will not be accumulated");
         }
 
         if let Some(mut last_height) = database::get_last_height(&self.pool, &self.chain_id).await?

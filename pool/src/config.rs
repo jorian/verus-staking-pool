@@ -84,6 +84,7 @@ pub async fn app_config() -> Result<Config> {
 
 pub enum Environment {
     Local,
+    Mock,
     Development,
     Staging,
     Production,
@@ -93,6 +94,7 @@ impl Environment {
     pub fn as_str(&self) -> &'static str {
         match self {
             Environment::Local => "local",
+            Environment::Mock => "mock",
             Environment::Development => "dev",
             Environment::Staging => "sta",
             Environment::Production => "prod",
@@ -106,6 +108,7 @@ impl TryFrom<String> for Environment {
     fn try_from(s: String) -> Result<Self, Self::Error> {
         match s.to_lowercase().as_str() {
             "local" => Ok(Self::Local),
+            "mock" => Ok(Self::Mock),
             "dev" => Ok(Self::Development),
             "sta" => Ok(Self::Staging),
             "prod" => Ok(Self::Production),

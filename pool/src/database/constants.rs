@@ -11,7 +11,7 @@ use crate::{
         constants::{Stake, StakeStatus, Staker},
         StakerStatus,
     },
-    payout::{PayoutMember, Worker},
+    payout_service::{PayoutMember, Worker},
 };
 
 pub struct DbStaker {

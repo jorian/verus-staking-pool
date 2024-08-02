@@ -65,7 +65,8 @@ impl Payout {
 
             let amount_fee = amount_share
                 .checked_mul(worker_fee)
-                .unwrap_or(Decimal::ZERO);
+                .unwrap_or(Decimal::ZERO)
+                .round_dp_with_strategy(8, RoundingStrategy::ToZero);
 
             let net_amount_share = amount_share
                 .checked_sub(amount_fee)
