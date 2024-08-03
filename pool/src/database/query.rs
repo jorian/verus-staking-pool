@@ -5,6 +5,7 @@ use anyhow::Result;
 use sqlx::postgres::PgRow;
 use sqlx::types::Decimal;
 use sqlx::{PgConnection, PgPool, Postgres, QueryBuilder, Row, Transaction};
+use vrsc_rpc::bitcoin::Txid;
 use vrsc_rpc::json::vrsc::{Address, Amount};
 
 use super::constants::{DbPayoutMember, DbWorker};
@@ -500,6 +501,70 @@ pub async fn get_payout_members(
     .await?;
 
     Ok(values)
+}
+
+/// Get all payout members that have not been paid yet.
+///
+/// The payoutmembers are selected on their min_payout settings.
+/// If a staker has left the pool, all remaining funds will be paid, disregarding
+/// the min_payout settings of the staker.
+///
+/// The query locks the rows until the transaction is committed (or dropped on error).
+pub async fn get_unpaid_payout_members(
+    conn: &mut PgConnection,
+    currency_address: &Address,
+) -> Result<Vec<PayoutMember>> {
+    let values = sqlx::query_as!(
+        DbPayoutMember,
+        "WITH pm_sum AS (
+            SELECT currency_address, identity_address, SUM(reward) AS total_rewards
+            FROM payout_members
+            WHERE currency_address = $1
+                AND txid is NULL
+            GROUP BY currency_address, identity_address
+        )
+        SELECT 
+            pm.currency_address,
+            pm.identity_address,
+            pm.block_hash,
+            pm.block_height,
+            pm.shares,
+            pm.reward,
+            pm.fee,
+            pm.txid
+        FROM payout_members pm
+        JOIN pm_sum ON pm.currency_address = pm_sum.currency_address
+            AND pm.identity_address = pm_sum.identity_address
+            AND pm.txid IS NULL
+        JOIN stakers s ON pm.currency_address = s.currency_address
+            AND pm.identity_address = s.identity_address
+        WHERE pm_sum.total_rewards > s.min_payout 
+            OR s.status = 'INACTIVE'
+        FOR UPDATE",
+        currency_address.to_string(),
+    )
+    .try_map(PayoutMember::try_from)
+    .fetch_all(conn)
+    .await?;
+
+    Ok(values)
+}
+
+pub async fn set_txid_payment_member(
+    conn: &mut PgConnection,
+    payout_member: &PayoutMember,
+    txid: &Txid,
+) -> Result<()> {
+    sqlx::query!(
+        "UPDATE payout_members SET txid = $3 WHERE currency_address = $1 AND block_height = $2",
+        payout_member.currency_address.to_string(),
+        payout_member.block_height as i64,
+        txid.to_string()
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]

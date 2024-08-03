@@ -42,24 +42,26 @@ impl App {
     }
 
     pub fn services(self) -> Result<Toplevel> {
-        let chain_configs = get_coin_configurations()?;
+        let coin_configs = get_coin_configurations()?;
         let mut coin_stakers = vec![];
         let mut coin_staker_payouts = vec![];
         let mut coin_staker_map = HashMap::new();
-        for chain_config in chain_configs {
-            let (tx, rx) = mpsc::channel::<CoinStakerMessage>(512);
-            let chain_id = chain_config.chain_id.clone();
+        for coin_config in coin_configs {
+            let (tx, rx) = mpsc::channel::<CoinStakerMessage>(1024);
+            let currency_id = coin_config.currency_id.clone();
             let coin_staker =
-                CoinStaker::new(self.pool.clone(), chain_config.clone(), tx.clone(), rx)?;
+                CoinStaker::new(self.pool.clone(), coin_config.clone(), tx.clone(), rx)?;
             coin_stakers.push(coin_staker);
 
             let payout = payout_service::Service::new(
-                chain_config.payout_config,
+                coin_config.payout_config,
                 self.pool.clone(),
-                chain_id.clone(),
+                currency_id.clone(),
+                coin_config.pool_address.clone(),
+                coin_config.chain_config.clone(),
             );
-            coin_staker_payouts.push((chain_id.clone(), payout));
-            coin_staker_map.insert(chain_id, tx);
+            coin_staker_payouts.push((currency_id.clone(), payout));
+            coin_staker_map.insert(currency_id, tx);
         }
 
         let http_service = HttpService {

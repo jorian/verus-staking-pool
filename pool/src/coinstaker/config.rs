@@ -12,8 +12,8 @@ use vrsc_rpc::{
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    pub chain_name: String,
-    pub chain_id: Address,
+    pub currency_name: String,
+    pub currency_id: Address,
     pub pool_address: Address,
     pub pool_primary_address: Address, // R-address stakers should include
     pub fee: Decimal,                  // basis points

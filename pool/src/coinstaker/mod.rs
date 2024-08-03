@@ -7,6 +7,7 @@ mod mock;
 mod zmq;
 
 pub use config::get_coin_configurations;
+pub use config::ChainConfig;
 pub use config::Config;
 pub use config::PayoutConfig;
 pub use constants::StakerStatus;

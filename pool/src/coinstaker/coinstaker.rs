@@ -41,7 +41,7 @@ impl CoinStaker {
         tx: mpsc::Sender<CoinStakerMessage>,
         rx: mpsc::Receiver<CoinStakerMessage>,
     ) -> Result<Self> {
-        let chain_id = config.chain_id.clone();
+        let chain_id = config.currency_id.clone();
 
         Ok(Self {
             pool,
@@ -58,7 +58,7 @@ impl CoinStaker {
         Ok(verus_client)
     }
 
-    #[instrument(skip(self), fields(coin = self.config.chain_name))]
+    #[instrument(skip(self), fields(coin = self.config.currency_name))]
     async fn listen(&mut self) -> Result<()> {
         trace!("listening for messages");
 
@@ -322,14 +322,14 @@ impl CoinStaker {
         Ok(())
     }
 
-    #[instrument(skip(self), fields(chain = self.chain_id.to_string()))]
+    #[instrument(skip(self, active_stakers))]
     async fn check_for_stake(
         &self,
         block_hash: &BlockHash,
         active_stakers: &Vec<Staker>,
     ) -> Result<()> {
         if let Some(stake) = self.is_stake(block_hash).await? {
-            debug!(?stake, "!!!!! STAKE FOUND !!!!!");
+            info!("!!!!! STAKE FOUND !!!!!");
 
             database::store_new_stake(&self.pool, &stake).await?;
         }
@@ -337,7 +337,6 @@ impl CoinStaker {
         Ok(())
     }
 
-    #[instrument(skip(self), fields(chain = self.chain_id.to_string()))]
     async fn is_stake(&self, block_hash: &BlockHash) -> Result<Option<Stake>> {
         let client = self.verusd()?;
         let block = client.get_block(block_hash, 2)?;
@@ -622,14 +621,14 @@ async fn check_stake_guard(block: &Block) -> Result<bool> {
 #[async_trait]
 impl IntoSubsystem<anyhow::Error> for CoinStaker {
     async fn run(mut self, subsys: SubsystemHandle) -> Result<()> {
-        info!("starting coinstaker {}", self.config.chain_name);
+        info!("starting coinstaker {}", self.config.currency_name);
         let client = self.verusd()?;
 
         // some preflight checks are needed:
 
         // if daemon is not staking, the work will not be counted towards shares
         if !client.get_mining_info()?.staking {
-            warn!(coin = %self.config.chain_name, "daemon is not staking, staker work will not be accumulated");
+            warn!(coin = %self.config.currency_name, "daemon is not staking, staker work will not be accumulated");
         }
 
         if let Some(mut last_height) = database::get_last_height(&self.pool, &self.chain_id).await?
