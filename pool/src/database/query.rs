@@ -300,7 +300,8 @@ pub async fn get_stakes_by_status(
         FROM stakes 
         WHERE currency_address = $1 AND 
             status = $2 AND 
-            block_height > $3"#,
+            block_height > $3
+        ORDER BY block_height ASC"#,
         currency_address.to_string(),
         status as StakeStatus,
         from_id.unwrap_or(0) as i64
@@ -331,7 +332,8 @@ pub async fn get_stakes(
             status AS "status: _"
         FROM stakes 
         WHERE currency_address = $1 AND 
-            block_height > $2"#,
+            block_height > $2
+        ORDER BY block_height ASC"#,
         currency_address.to_string(),
         from_height.unwrap_or(0) as i64
     )
@@ -368,7 +370,8 @@ pub async fn get_last_height(pool: &PgPool, currency_address: &Address) -> Resul
     let row = sqlx::query!(
         "SELECT last_height 
         FROM synchronization 
-        WHERE currency_address = $1",
+        WHERE currency_address = $1
+        FOR UPDATE",
         currency_address.to_string()
     )
     .map(|r| r.last_height as u64)
@@ -401,7 +404,10 @@ pub async fn get_workers_by_round(
 
 pub async fn get_payout_sync_id(pool: &PgPool, currency_address: &Address) -> Result<Option<u64>> {
     let value = sqlx::query!(
-        "SELECT last_payout_height FROM synchronization WHERE currency_address = $1",
+        "SELECT last_payout_height 
+        FROM synchronization 
+        WHERE currency_address = $1 
+        FOR UPDATE",
         currency_address.to_string()
     )
     .fetch_optional(pool)
