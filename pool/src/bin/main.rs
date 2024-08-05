@@ -35,7 +35,7 @@ async fn main() -> Result<(), anyhow::Error> {
     info!("starting services");
     services
         .catch_signals()
-        .handle_shutdown_requests(Duration::from_millis(1000))
+        .handle_shutdown_requests(Duration::from_millis(5000))
         .await
         .map_err(Into::into)
 }

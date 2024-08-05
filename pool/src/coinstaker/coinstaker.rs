@@ -617,6 +617,12 @@ async fn check_stake_guard(block: &Block) -> Result<bool> {
     Ok(false)
 }
 
+fn disable_staking(client: VerusClient) -> Result<()> {
+    client.set_generate(false, 0)?;
+
+    Ok(())
+}
+
 #[cfg(not(feature = "mock"))]
 #[async_trait]
 impl IntoSubsystem<anyhow::Error> for CoinStaker {
@@ -660,8 +666,9 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
 
         select! {
             _ = subsys.on_shutdown_requested() => {
-                info!("shutting down coinstaker");
-                // ability to do some cleanup before closing here
+                info!("shutting down coinstaker, disable staking");
+
+                disable_staking(self.verusd()?)?;
             },
             r = self.listen() => {
                 warn!("stopped listening");
