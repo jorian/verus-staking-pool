@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use pool::{app::App, config::app_config};
-use tracing::{debug, info, trace, Level};
+use tracing::{info, trace, Level};
 use tracing_subscriber::{
     fmt::{self, writer::MakeWriterExt},
     layer::SubscriberExt,

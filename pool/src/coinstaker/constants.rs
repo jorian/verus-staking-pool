@@ -1,12 +1,18 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use vrsc_rpc::{
     bitcoin::{BlockHash, Txid},
-    json::vrsc::{util::amount::serde::as_sat, Address, Amount},
+    json::{
+        vrsc::{util::amount::serde::as_sat, Address, Amount},
+        Block,
+    },
 };
 
-use crate::payout_service::PayoutMember;
+use crate::{
+    payout_service::PayoutMember,
+    util::verus::{coinbase_value, postxddest, staker_utxo_value},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Staker {
@@ -75,6 +81,32 @@ pub struct Stake {
 }
 
 impl Stake {
+    pub fn try_new(chain_id: &Address, block: &Block) -> anyhow::Result<Self> {
+        let postxddest = postxddest(&block)?;
+        let source_amount = staker_utxo_value(block)?;
+        let coinbase_value = coinbase_value(&block)?;
+
+        let source_txid = block
+            .possourcetxid
+            .context("there should always be a txid for the source stake")?;
+
+        let source_vout_num = block
+            .possourcevoutnum
+            .context("there should always be a stake spend vout")?;
+
+        Ok(Self {
+            currency_address: chain_id.clone(),
+            block_hash: block.hash,
+            block_height: block.height,
+            found_by: postxddest,
+            source_txid,
+            source_vout_num,
+            source_amount,
+            status: StakeStatus::Maturing,
+            amount: coinbase_value,
+        })
+    }
+
     pub fn new(
         currency_address: &Address,
         block_hash: &BlockHash,
@@ -133,41 +165,3 @@ impl From<PayoutMember> for StakerBalance {
         }
     }
 }
-
-// #[allow(unused)]
-// fn block() -> Block {
-//     let block = Block {
-//         hash: todo!(),
-//         validation_type: todo!(),
-//         postarget: todo!(),
-//         poshashbh: todo!(),
-//         poshashtx: todo!(),
-//         possourcetxid: todo!(),
-//         possourcevoutnum: todo!(),
-//         posrewarddest: todo!(),
-//         postxddest: todo!(),
-//         confirmations: todo!(),
-//         size: todo!(),
-//         height: todo!(),
-//         version: todo!(),
-//         merkle_root: todo!(),
-//         seg_id: todo!(),
-//         final_sapling_root: todo!(),
-//         tx: todo!(),
-//         time: todo!(),
-//         nonce: todo!(),
-//         solution: todo!(),
-//         bits: todo!(),
-//         difficulty: todo!(),
-//         chain_work: todo!(),
-//         chain_stake: todo!(),
-//         anchor: todo!(),
-//         block_type: todo!(),
-//         value_pools: todo!(),
-//         previous_blockhash: todo!(),
-//         next_blockhash: todo!(),
-//         proofroot: todo!(),
-//     };
-
-//     block
-// }

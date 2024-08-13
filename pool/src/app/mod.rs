@@ -1,12 +1,7 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     coinstaker::{
-        self,
         coinstaker::{CoinStaker, CoinStakerMessage},
         get_coin_configurations,
     },
@@ -113,6 +108,9 @@ impl App {
     }
 
     pub fn services(self) -> Result<Toplevel> {
+        use crate::coinstaker::Config as CoinstakerConfig;
+        use std::path::{Path, PathBuf};
+
         let pool = self.pool.clone();
 
         let (tx, rx) = mpsc::channel(128);
@@ -121,7 +119,7 @@ impl App {
         let config = config::Config::builder()
             .add_source(config::File::from(config_path.as_path()))
             .build()?
-            .try_deserialize::<coinstaker::Config>()?;
+            .try_deserialize::<CoinstakerConfig>()?;
 
         let coinstaker = CoinStaker::new(pool, config, tx, rx)?;
 

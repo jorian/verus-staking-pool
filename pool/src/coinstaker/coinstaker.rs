@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use axum::async_trait;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
@@ -19,7 +19,7 @@ use crate::coinstaker::constants::{Stake, StakeStatus};
 use crate::database;
 use crate::http::constants::StakingSupply;
 use crate::payout_service::PayoutMember;
-use crate::util::verus;
+use crate::util::verus::*;
 
 use super::config::Config as CoinstakerConfig;
 use super::constants::{Staker, StakerBalance};
@@ -96,7 +96,7 @@ impl CoinStaker {
                     self.add_work(&active_stakers, block.height).await?;
                     database::update_last_height(&self.pool, &self.chain_id, block.height).await?;
 
-                    self.check_for_stake(&block_hash, &active_stakers).await?;
+                    self.check_for_stake(&block_hash).await?;
                 }
                 CoinStakerMessage::StakingSupply(os_tx, identity_addresses) => {
                     let res = self.get_staking_supply(identity_addresses).await?;
@@ -164,8 +164,6 @@ impl CoinStaker {
                         &identity_addresses,
                     )
                     .await?;
-
-                    debug!(?payout_members);
 
                     let mut hm = HashMap::new();
 
@@ -310,7 +308,7 @@ impl CoinStaker {
                     debug!(
                         amount_to_add = %stake.source_amount.as_vrsc(),
                         staker = %stake.found_by,
-                        "count work of maturing stake"
+                        "count work of immature utxo because it staked"
                     );
                     *v += Decimal::from_i64(stake.source_amount.as_sat() as i64).unwrap()
                 });
@@ -322,14 +320,10 @@ impl CoinStaker {
         Ok(())
     }
 
-    #[instrument(skip(self, active_stakers))]
-    async fn check_for_stake(
-        &self,
-        block_hash: &BlockHash,
-        active_stakers: &Vec<Staker>,
-    ) -> Result<()> {
+    #[instrument(skip(self))]
+    async fn check_for_stake(&self, block_hash: &BlockHash) -> Result<()> {
         if let Some(stake) = self.is_stake(block_hash).await? {
-            info!("!!!!! STAKE FOUND !!!!!");
+            info!(height = %stake.block_height, "stake found");
 
             database::store_new_stake(&self.pool, &stake).await?;
         }
@@ -343,63 +337,46 @@ impl CoinStaker {
 
         // block.confirmations == -1 indicates it is stale and should be ignored
         if matches!(block.validation_type, ValidationType::Stake) && block.confirmations >= 0 {
-            let postxddest = block
-                .postxddest
-                .context("a stake must always have a postxddest")?;
+            let postxddest = postxddest(&block)?;
+
+            if let Some(stake) = self.is_staked_by_pool(&block, &postxddest).await? {
+                return Ok(Some(stake));
+            }
+
             let active_stakers =
                 database::get_stakers_by_status(&self.pool, &self.chain_id, StakerStatus::Active)
                     .await?;
 
-            let Some(staker) = active_stakers
-                .iter()
-                .find(|s| s.identity_address == postxddest && s.currency_address == self.chain_id)
-            else {
+            let Some(staker) = active_stakers.iter().find(|s| {
+                &s.identity_address == &postxddest && s.currency_address == self.chain_id
+            }) else {
                 return Ok(None);
             };
 
             trace!("{} staked a block", staker.identity_address);
 
-            let coinbase_value = block
-                .tx
-                .first()
-                .context("there should always be a coinbase transaction")?
-                .vout
-                .first()
-                .context("there should always be a coinbase output")?
-                .value_sat;
-
-            let staker_utxo_value = block
-                .tx
-                .iter()
-                .last()
-                .context("there should always be a stake spend utxo")?
-                .vin
-                .first()
-                .context("there should always be an input to a stake spend")?
-                .value_sat
-                .context("there should always be a positive stake")?;
-
-            let stake = Stake::new(
-                &self.chain_id,
-                block_hash,
-                block.height,
-                &postxddest,
-                block
-                    .possourcetxid
-                    .context("there should always be a txid for the source stake")?,
-                block
-                    .possourcevoutnum
-                    .context("there should always be a stake spend vout")?,
-                staker_utxo_value,
-                StakeStatus::Maturing,
-                coinbase_value,
-            );
+            let stake = Stake::try_new(&self.chain_id, &block)?;
 
             return Ok(Some(stake));
         }
-        // get the block details from the daemon
-        // we should check whether the staker of the block is an active member of our pool
+
         Ok(None)
+    }
+
+    async fn is_staked_by_pool(
+        &self,
+        block: &Block,
+        postxddest: &Address,
+    ) -> Result<Option<Stake>> {
+        if &self.config.pool_address == postxddest {
+            info!(?postxddest, "staked by pool address");
+
+            let stake = Stake::try_new(&self.chain_id, &block)?;
+
+            Ok(Some(stake))
+        } else {
+            Ok(None)
+        }
     }
 
     fn identity_is_eligible(&self, identity: &IdentityPrimary) -> bool {
@@ -480,7 +457,7 @@ impl CoinStaker {
             .collect::<Vec<_>>();
 
         let staking_supply =
-            verus::get_staking_supply(&self.chain_id, &identity_addresses, &verus_client)?;
+            get_staking_supply(&self.chain_id, &identity_addresses, &verus_client)?;
 
         Ok(staking_supply)
     }
@@ -599,30 +576,6 @@ impl CoinStaker {
     }
 }
 
-/// Returns true if a stake was stolen and caught by StakeGuard
-async fn check_stake_guard(block: &Block) -> Result<bool> {
-    if block
-        .tx
-        .first() // we always need the coinbase, it is always first
-        .expect("every block has a coinbase tx")
-        .vout
-        .first()
-        .expect("every tx has at least 1 vout")
-        .spent_tx_id
-        .is_some()
-    {
-        return Ok(true);
-    }
-
-    Ok(false)
-}
-
-fn disable_staking(client: VerusClient) -> Result<()> {
-    client.set_generate(false, 0)?;
-
-    Ok(())
-}
-
 #[cfg(not(feature = "mock"))]
 #[async_trait]
 impl IntoSubsystem<anyhow::Error> for CoinStaker {
@@ -636,6 +589,11 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
         if !client.get_mining_info()?.staking {
             warn!(coin = %self.config.currency_name, "daemon is not staking, staker work will not be accumulated");
         }
+
+        tokio::spawn(super::zmq::tmq_block_listen(
+            self.config.chain_config.zmq_port_blocknotify,
+            self.tx.clone(),
+        ));
 
         if let Some(mut last_height) = database::get_last_height(&self.pool, &self.chain_id).await?
         {
@@ -658,11 +616,6 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
 
             database::update_last_height(&self.pool, &self.chain_id, last_height).await?;
         }
-
-        tokio::spawn(super::zmq::tmq_block_listen(
-            self.config.chain_config.zmq_port_blocknotify,
-            self.tx.clone(),
-        ));
 
         select! {
             _ = subsys.on_shutdown_requested() => {
