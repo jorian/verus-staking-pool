@@ -219,7 +219,7 @@ impl CoinStaker {
                 return Ok(());
             }
 
-            if block.confirmations < 150 {
+            if block.confirmations < 100 {
                 if check_stake_guard(&block).await? {
                     trace!("The transaction was spent by stakeguard");
                     stake.status = StakeStatus::StakeGuard;
