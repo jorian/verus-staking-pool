@@ -298,17 +298,21 @@ impl CoinStaker {
                 acc
             });
 
-        let maturing_stakes =
-            database::get_stakes_by_status(&self.pool, &self.chain_id, StakeStatus::Maturing, None)
-                .await?;
+        let stakes_to_compensate = database::get_stakes_by_block_height(
+            &self.pool,
+            &self.chain_id,
+            (blockheight - 150) as i64,
+        )
+        .await?;
 
-        maturing_stakes.iter().for_each(|stake| {
+        stakes_to_compensate.iter().for_each(|stake| {
             if payload.contains_key(&stake.found_by) {
                 payload.entry(stake.found_by.clone()).and_modify(|v| {
                     debug!(
                         amount_to_add = %stake.source_amount.as_vrsc(),
                         staker = %stake.found_by,
-                        "count work of immature utxo because it staked"
+                        blockheight = &stake.block_height,
+                        "compensate work of immature utxo because it staked"
                     );
                     *v += Decimal::from_i64(stake.source_amount.as_sat() as i64).unwrap()
                 });

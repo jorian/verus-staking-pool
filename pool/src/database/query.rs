@@ -313,6 +313,38 @@ pub async fn get_stakes_by_status(
     Ok(rows)
 }
 
+/// Returns stakes that are above <block_height>
+pub async fn get_stakes_by_block_height(
+    pool: &PgPool,
+    currency_address: &Address,
+    block_height: i64,
+) -> Result<Vec<Stake>> {
+    let rows = sqlx::query_as!(
+        DbStake,
+        r#"SELECT
+            currency_address,
+            block_hash,
+            block_height,
+            amount,
+            found_by,
+            source_txid,
+            source_vout_num,
+            source_amount,
+            status AS "status: _"
+        FROM stakes 
+        WHERE currency_address = $1 AND 
+            block_height > $2
+        ORDER BY block_height ASC"#,
+        currency_address.to_string(),
+        block_height as i64
+    )
+    .try_map(Stake::try_from)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
 pub async fn get_stakes(
     pool: &PgPool,
     currency_address: &Address,
