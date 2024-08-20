@@ -14,15 +14,28 @@ use crate::{
     util::verus::{coinbase_value, postxddest, staker_utxo_value},
 };
 
+/// Represents a participant in the staking pool.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Staker {
     pub currency_address: Address,
     pub identity_address: Address,
     pub identity_name: String,
+    /// The amount in sats that is used to determine when to pay out the rewards of this staker.
+    /// Once the accumulated rewards are higher than this threshold, a payout will be done.
     #[serde(with = "as_sat")]
     pub min_payout: Amount,
+    /// Can be one of ["active", "cooling_down", "inactive"]
+    /// A staker is **active** when the VerusID fulfills all the requirements as set in the
+    /// VerusVaultConditions of this pool.
+    /// A staker is **cooling down** when it updated its VerusID in the last 150 blocks.
+    /// VerusIDs that were updated in the last 150 blocks are ineligible to stake.
+    /// A staker that is **inactive** is a VerusID that was active before but updated its
+    /// VerusID which made it ineligible according to the VerusVaultConditions.
     pub status: StakerStatus,
-    pub fee: Decimal, // in basis points
+    /// The fee percentage that is used to determine how much fee is kept by the staking pool,
+    /// when doing a payout. It is expressed as basis points, so 1% should be expressed as 0.01,
+    /// 0.3% as 0.003, etc.
+    pub fee: Decimal,
 }
 
 impl Staker {
@@ -46,6 +59,7 @@ impl Staker {
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, PartialEq, Eq, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "staker_status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StakerStatus {
     Active,

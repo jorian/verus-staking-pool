@@ -5,6 +5,7 @@ use anyhow::Result;
 use sqlx::postgres::PgRow;
 use sqlx::types::Decimal;
 use sqlx::{PgConnection, PgPool, Postgres, QueryBuilder, Row, Transaction};
+use tracing::debug;
 use vrsc_rpc::bitcoin::Txid;
 use vrsc_rpc::json::vrsc::{Address, Amount};
 
@@ -57,7 +58,7 @@ pub async fn get_stakers_by_identity_address(
     let query = query_builder.build();
     let rows: Vec<PgRow> = query.fetch_all(pool).await?;
 
-    let subs = rows
+    let stakers = rows
         .into_iter()
         .map(|row| Staker {
             currency_address: Address::from_str(row.get("currency_address")).unwrap(),
@@ -69,7 +70,7 @@ pub async fn get_stakers_by_identity_address(
         })
         .collect::<Vec<_>>();
 
-    Ok(subs)
+    Ok(stakers)
 }
 
 pub async fn get_stakers_by_status(
@@ -139,6 +140,7 @@ pub async fn store_work(
     let mut tx = pool.begin().await?;
 
     for (staker_address, shares) in payload {
+        debug!(?staker_address, ?shares, "creating query");
         sqlx::query_file!(
             "sql/store_work.sql",
             currency_address.to_string(),
@@ -153,7 +155,6 @@ pub async fn store_work(
         // synchronization, where we keep track of the latest state of a subscriber.
         // it was only used in tests and to get the last round on startup
     }
-
     tx.commit().await?;
 
     Ok(())
@@ -314,36 +315,36 @@ pub async fn get_stakes_by_status(
 }
 
 /// Returns stakes that are above <block_height>
-pub async fn get_stakes_by_block_height(
-    pool: &PgPool,
-    currency_address: &Address,
-    block_height: i64,
-) -> Result<Vec<Stake>> {
-    let rows = sqlx::query_as!(
-        DbStake,
-        r#"SELECT
-            currency_address,
-            block_hash,
-            block_height,
-            amount,
-            found_by,
-            source_txid,
-            source_vout_num,
-            source_amount,
-            status AS "status: _"
-        FROM stakes 
-        WHERE currency_address = $1 AND 
-            block_height > $2
-        ORDER BY block_height ASC"#,
-        currency_address.to_string(),
-        block_height as i64
-    )
-    .try_map(Stake::try_from)
-    .fetch_all(pool)
-    .await?;
+// pub async fn get_stakes_by_block_height(
+//     pool: &PgPool,
+//     currency_address: &Address,
+//     block_height: i64,
+// ) -> Result<Vec<Stake>> {
+//     let rows = sqlx::query_as!(
+//         DbStake,
+//         r#"SELECT
+//             currency_address,
+//             block_hash,
+//             block_height,
+//             amount,
+//             found_by,
+//             source_txid,
+//             source_vout_num,
+//             source_amount,
+//             status AS "status: _"
+//         FROM stakes
+//         WHERE currency_address = $1 AND
+//             block_height > $2
+//         ORDER BY block_height ASC"#,
+//         currency_address.to_string(),
+//         block_height as i64
+//     )
+//     .try_map(Stake::try_from)
+//     .fetch_all(pool)
+//     .await?;
 
-    Ok(rows)
-}
+//     Ok(rows)
+// }
 
 pub async fn get_stakes(
     pool: &PgPool,

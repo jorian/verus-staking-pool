@@ -1,5 +1,5 @@
 use anyhow::Context;
-use axum::{debug_handler, Extension};
+use axum::Extension;
 use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
 use vrsc_rpc::json::vrsc::Address;
@@ -16,7 +16,20 @@ pub struct Identities {
     identity_addresses: Vec<Address>,
 }
 
-#[debug_handler]
+/// Returns the staking supply of this pool.
+///
+/// Returns a JSON of 3 staking supplies:
+/// - The current staking supply of the network
+/// - The current staking supply of this staking pool
+/// - The current staking supply of the VerusIDs supplied in the arguments.
+///
+/// ```json
+/// {
+///     "staker": 10.24681657,
+///     "pool": 250.12345678,
+///     "network": 75565.23456789
+/// }
+/// ```
 pub async fn staking_supply(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     axum_extra::extract::Query(items): axum_extra::extract::Query<Identities>,

@@ -64,7 +64,10 @@ pub fn main_router(state: AppState) -> axum::Router {
 
 pub fn currency_router(state: AppState) -> axum::Router {
     axum::Router::new()
-        .route("/:currency/pooladdress", get(handler::app::pool_address))
+        .route(
+            "/:currency/poolprimaryaddress",
+            get(handler::app::pool_primary_address),
+        )
         .route(
             "/:currency/stakingsupply",
             get(handler::blockchain::staking_supply),

@@ -107,25 +107,29 @@ impl CoinStaker {
                 }
                 CoinStakerMessage::StakerStatus(os_tx, identity_address) => {
                     let verus_client = self.verusd()?;
-                    self.check_staker_status(&verus_client, &identity_address)
+                    let opt_staker = self
+                        .check_staker_status(&verus_client, &identity_address)
                         .await?;
 
                     os_tx
-                        .send("success".to_string())
+                        .send(opt_staker)
                         .expect("a oneshot message failed to send");
                 }
-
-                CoinStakerMessage::GetStakers(os_tx, identity_address, staker_status) => {
+                CoinStakerMessage::GetStakers(os_tx, identity_addresses, staker_status) => {
                     let staker = if let Some(status) = staker_status {
+                        // TODO build a better query for this:
                         database::get_stakers_by_status(&self.pool, &self.chain_id, status)
                             .await?
                             .into_iter()
-                            .filter(|s| s.identity_address == identity_address)
+                            .filter(|s| identity_addresses.contains(&s.identity_address))
                             .collect::<Vec<_>>()
                     } else {
-                        database::get_staker(&self.pool, &self.chain_id, &identity_address)
-                            .await?
-                            .map_or(vec![], |s| vec![s])
+                        database::get_stakers_by_identity_address(
+                            &self.pool,
+                            &self.chain_id,
+                            &identity_addresses,
+                        )
+                        .await?
                     };
                     if os_tx.send(staker).is_err() {
                         Err(anyhow!("the sender dropped"))?
@@ -298,10 +302,11 @@ impl CoinStaker {
                 acc
             });
 
-        let stakes_to_compensate = database::get_stakes_by_block_height(
+        let stakes_to_compensate = database::get_stakes_by_status(
             &self.pool,
             &self.chain_id,
-            (blockheight - 150) as i64,
+            StakeStatus::Maturing,
+            Some(blockheight - 150),
         )
         .await?;
 
@@ -318,6 +323,8 @@ impl CoinStaker {
                 });
             }
         });
+
+        debug!(?payload, "storing work");
 
         database::store_work(&self.pool, &self.chain_id, payload, blockheight).await?;
 
@@ -502,7 +509,7 @@ impl CoinStaker {
         &self,
         client: &VerusClient,
         identity_address: &Address,
-    ) -> Result<()> {
+    ) -> Result<Option<Staker>> {
         let identity = client.get_identity(&identity_address.to_string())?;
 
         if let Some(mut staker) = database::get_staker(
@@ -512,7 +519,7 @@ impl CoinStaker {
         )
         .await?
         {
-            debug!("staker found in database");
+            debug!(?staker, "staker found in database");
 
             match staker.status {
                 StakerStatus::Active => {
@@ -551,6 +558,8 @@ impl CoinStaker {
                     // TODO self.webhooks.send(activated)
                 }
             }
+
+            return Ok(Some(staker));
         } else {
             trace!("verusid not found in database");
 
@@ -567,6 +576,7 @@ impl CoinStaker {
                 database::store_staker(&self.pool, &staker).await?;
                 trace!("new staker stored in database.");
 
+                return Ok(Some(staker));
                 // TODO self.webhooks.send(activated)
             } else {
                 trace!(id = &identity.fullyqualifiedname, "verusid not eligible");
@@ -576,7 +586,7 @@ impl CoinStaker {
             // and if it fulfills the vault conditions
         }
 
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -642,8 +652,12 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
 pub enum CoinStakerMessage {
     Block(BlockHash),
     StakingSupply(oneshot::Sender<StakingSupply>, Vec<Address>),
-    StakerStatus(oneshot::Sender<String>, Address),
-    GetStakers(oneshot::Sender<Vec<Staker>>, Address, Option<StakerStatus>),
+    StakerStatus(oneshot::Sender<Option<Staker>>, Address),
+    GetStakers(
+        oneshot::Sender<Vec<Staker>>,
+        Vec<Address>,
+        Option<StakerStatus>,
+    ),
     GetStakerBalance(oneshot::Sender<Vec<(Address, StakerBalance)>>, Vec<Address>),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
     GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),

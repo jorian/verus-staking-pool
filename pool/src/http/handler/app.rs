@@ -16,8 +16,10 @@ pub async fn info(State(controller): State<AppState>) -> Json<String> {
     Json(version)
 }
 
-#[debug_handler]
-pub async fn pool_address(
+/// Returns the primary address of the pool.
+///
+/// Is to be added to the `primaryaddresses` field of VerusIDs that want to stake in this pool.
+pub async fn pool_primary_address(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
 ) -> Result<AppJson<String>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<String>();
