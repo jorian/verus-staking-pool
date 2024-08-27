@@ -36,7 +36,7 @@ impl App {
         Ok(Self { pool, config })
     }
 
-    pub fn services(self) -> Result<Toplevel> {
+    pub async fn services(self, start_staking: bool) -> Result<Toplevel> {
         let coin_configs = get_coin_configurations()?;
         let mut coin_stakers = vec![];
         let mut coin_staker_payouts = vec![];
@@ -56,6 +56,11 @@ impl App {
                 coin_config.chain_config.clone(),
             );
             coin_staker_payouts.push((currency_id.clone(), payout));
+
+            if start_staking {
+                tx.send(CoinStakerMessage::SetStaking(true)).await?;
+            }
+
             coin_staker_map.insert(currency_id, tx);
         }
 

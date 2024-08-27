@@ -77,8 +77,7 @@ pub struct GetStakerArgs {
 ///
 /// `staker_status` can be one of ["active", "cooling_down", "inactive"].
 ///
-/// If one of the supplied identity addresses is not found in this pool, a 404 NOT FOUND
-/// is returned.
+/// Ignores VerusIDs that are not found.
 pub async fn get_stakers(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<GetStakerArgs>,
@@ -98,6 +97,9 @@ pub async fn get_stakers(
     Ok(AppJson(res))
 }
 
+/// Returns an array of balances, based on the provided VerusIDs.
+///
+/// The balances represent the currently eligible staking balance.
 pub async fn get_staker_balance(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<Vec<(String, Address)>>,

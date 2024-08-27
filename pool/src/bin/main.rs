@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use argh::FromArgs;
+
 use pool::{app::App, config::app_config};
 use tracing::{info, trace, Level};
 use tracing_subscriber::{
@@ -11,6 +13,8 @@ use tracing_subscriber::{
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    let app_args: AppArgs = argh::from_env();
+
     let filter_layer = EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("info"))?;
 
     let file_appender = tracing_appender::rolling::hourly("./logs", "error");
@@ -30,7 +34,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let config = app_config().await?;
 
     let app = App::new(config).await?;
-    let services = app.services()?;
+    let services = app.services(app_args.staking).await?;
 
     info!("starting services");
     services
@@ -38,4 +42,12 @@ async fn main() -> Result<(), anyhow::Error> {
         .handle_shutdown_requests(Duration::from_millis(5000))
         .await
         .map_err(Into::into)
+}
+
+#[derive(FromArgs)]
+/// Command line arguments to define start up
+struct AppArgs {
+    /// enable staking on startup
+    #[argh(switch, short = 's')]
+    staking: bool,
 }

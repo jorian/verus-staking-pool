@@ -4,7 +4,7 @@ INSERT INTO work(
     staker_address, 
     shares
 ) VALUES ($1, $2, $3, $4)
-ON CONFLICT work_pkey 
+ON CONFLICT ON CONSTRAINT work_pkey 
 DO UPDATE
 SET shares = work.shares + EXCLUDED.shares
 WHERE work.currency_address = EXCLUDED.currency_address 

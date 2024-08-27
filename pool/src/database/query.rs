@@ -155,6 +155,7 @@ pub async fn store_work(
         // synchronization, where we keep track of the latest state of a subscriber.
         // it was only used in tests and to get the last round on startup
     }
+
     tx.commit().await?;
 
     Ok(())
@@ -314,37 +315,41 @@ pub async fn get_stakes_by_status(
     Ok(rows)
 }
 
-/// Returns stakes that are above <block_height>
-// pub async fn get_stakes_by_block_height(
-//     pool: &PgPool,
-//     currency_address: &Address,
-//     block_height: i64,
-// ) -> Result<Vec<Stake>> {
-//     let rows = sqlx::query_as!(
-//         DbStake,
-//         r#"SELECT
-//             currency_address,
-//             block_hash,
-//             block_height,
-//             amount,
-//             found_by,
-//             source_txid,
-//             source_vout_num,
-//             source_amount,
-//             status AS "status: _"
-//         FROM stakes
-//         WHERE currency_address = $1 AND
-//             block_height > $2
-//         ORDER BY block_height ASC"#,
-//         currency_address.to_string(),
-//         block_height as i64
-//     )
-//     .try_map(Stake::try_from)
-//     .fetch_all(pool)
-//     .await?;
+/// Returns stakes that are above <block_height> and are either maturing or have matured.
+///
+/// This is useful to compensate for work that is lost due to maturing UTXOs because they were
+/// spent because of staking.
+pub async fn get_stakes_to_compensate(
+    pool: &PgPool,
+    currency_address: &Address,
+    block_height: i64,
+) -> Result<Vec<Stake>> {
+    let rows = sqlx::query_as!(
+        DbStake,
+        r#"SELECT
+            currency_address,
+            block_hash,
+            block_height,
+            amount,
+            found_by,
+            source_txid,
+            source_vout_num,
+            source_amount,
+            status AS "status: _"
+        FROM stakes
+        WHERE currency_address = $1 AND
+            block_height > ($2 - 150) AND
+            (status = 'MATURED' OR status = 'MATURING')
+        ORDER BY block_height ASC"#,
+        currency_address.to_string(),
+        block_height as i64
+    )
+    .try_map(Stake::try_from)
+    .fetch_all(pool)
+    .await?;
 
-//     Ok(rows)
-// }
+    Ok(rows)
+}
 
 pub async fn get_stakes(
     pool: &PgPool,

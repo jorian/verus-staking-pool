@@ -14,6 +14,7 @@ mock = []
 
 [dependencies]
 anyhow = "1.0.82"
+argh = "0.1.10"
 async-trait = "0.1.80"
 config = { version = "0.14.0", default-features = false, features = [
     "json",
@@ -64,4 +65,4 @@ features = [
     "chrono",
     "runtime-tokio-rustls",
 ]
-version = "0.7.4"
+version = "0.8.1"

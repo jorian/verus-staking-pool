@@ -197,6 +197,11 @@ impl CoinStaker {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
+                CoinStakerMessage::SetStaking(enable_staking) => {
+                    let verus_client = self.verusd()?;
+
+                    verus_client.set_generate(enable_staking, 0)?;
+                }
             }
         }
 
@@ -302,13 +307,9 @@ impl CoinStaker {
                 acc
             });
 
-        let stakes_to_compensate = database::get_stakes_by_status(
-            &self.pool,
-            &self.chain_id,
-            StakeStatus::Maturing,
-            Some(blockheight - 150),
-        )
-        .await?;
+        let stakes_to_compensate =
+            database::get_stakes_to_compensate(&self.pool, &self.chain_id, blockheight as i64)
+                .await?;
 
         stakes_to_compensate.iter().for_each(|stake| {
             if payload.contains_key(&stake.found_by) {
@@ -662,4 +663,5 @@ pub enum CoinStakerMessage {
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
     GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),
     PoolPrimaryAddress(oneshot::Sender<String>),
+    SetStaking(bool),
 }
