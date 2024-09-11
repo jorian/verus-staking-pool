@@ -8,7 +8,7 @@ use vrsc_rpc::json::vrsc::Address;
 use crate::{
     coinstaker::{
         coinstaker::CoinStakerMessage,
-        constants::{Staker, StakerBalance},
+        constants::{Staker, StakerEarnings},
         StakerStatus,
     },
     http::handler::AppJson,
@@ -99,16 +99,16 @@ pub async fn get_stakers(
 
 /// Returns an array of balances, based on the provided VerusIDs.
 ///
-/// The balances represent the currently eligible staking balance.
-pub async fn get_staker_balance(
+/// The balances represent how much each staker has earned in the pool
+pub async fn get_staker_earnings(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<Vec<(String, Address)>>,
-) -> Result<AppJson<Vec<(Address, StakerBalance)>>, AppError> {
-    let (os_tx, os_rx) = oneshot::channel::<Vec<(Address, StakerBalance)>>();
+) -> Result<AppJson<Vec<(Address, StakerEarnings)>>, AppError> {
+    let (os_tx, os_rx) = oneshot::channel::<Vec<(Address, StakerEarnings)>>();
 
     let args = args.into_iter().map(|arg| arg.1).collect::<Vec<_>>();
 
-    tx.send(CoinStakerMessage::GetStakerBalance(os_tx, args))
+    tx.send(CoinStakerMessage::GetStakerEarnings(os_tx, args))
         .await
         .context("Could not send Coinstaker message")?;
 
@@ -117,4 +117,24 @@ pub async fn get_staker_balance(
     debug!("{:?}", &map);
 
     Ok(AppJson(map))
+}
+
+/// Returns an array of staking balances, based on the provided VerusIDs.
+///
+/// The balances represent the currently eligible staking balance.
+pub async fn get_staking_balance(
+    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+    Query(args): Query<Vec<(String, Address)>>,
+) -> Result<AppJson<Vec<(Address, f64)>>, AppError> {
+    let (os_tx, os_rx) = oneshot::channel::<Vec<(Address, f64)>>();
+
+    let args = args.into_iter().map(|arg| arg.1).collect::<Vec<_>>();
+
+    tx.send(CoinStakerMessage::GetStakingBalance(os_tx, args))
+        .await
+        .context("Could not send Coinstaker message")?;
+
+    let balances = os_rx.await.context("Sender dropped")?;
+
+    Ok(AppJson(balances))
 }

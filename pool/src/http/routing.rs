@@ -78,8 +78,12 @@ pub fn currency_router(state: AppState) -> axum::Router {
         )
         .route("/:currency/staker", get(handler::staker::get_stakers))
         .route(
-            "/:currency/stakerbalance",
-            get(handler::staker::get_staker_balance),
+            "/:currency/stakerearnings",
+            get(handler::staker::get_staker_earnings),
+        )
+        .route(
+            "/:currency/stakingbalance",
+            get(handler::staker::get_staking_balance),
         )
         .route("/:currency/stake", get(handler::stake::get_stakes))
         .route("/:currency/payout", get(handler::payout::get_payouts))

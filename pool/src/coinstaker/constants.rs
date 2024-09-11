@@ -157,22 +157,22 @@ pub enum StakeStatus {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct StakerBalance {
+pub struct StakerEarnings {
     #[serde(with = "as_sat")]
     pub paid: Amount, // payoutmembers with a txid
     #[serde(with = "as_sat")]
     pub pending: Amount, // payoutmembers without a txid
 }
 
-impl From<PayoutMember> for StakerBalance {
+impl From<PayoutMember> for StakerEarnings {
     fn from(value: PayoutMember) -> Self {
         if value.txid.is_some() {
-            StakerBalance {
+            StakerEarnings {
                 paid: value.reward,
                 pending: Amount::ZERO,
             }
         } else {
-            StakerBalance {
+            StakerEarnings {
                 paid: Amount::ZERO,
                 pending: value.reward,
             }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use axum::async_trait;
-use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tokio::select;
@@ -22,7 +22,7 @@ use crate::payout_service::PayoutMember;
 use crate::util::verus::*;
 
 use super::config::Config as CoinstakerConfig;
-use super::constants::{Staker, StakerBalance};
+use super::constants::{Staker, StakerEarnings};
 use super::StakerStatus;
 
 #[derive(Debug)]
@@ -160,7 +160,7 @@ impl CoinStaker {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
-                CoinStakerMessage::GetStakerBalance(os_tx, identity_addresses) => {
+                CoinStakerMessage::GetStakerEarnings(os_tx, identity_addresses) => {
                     let mut conn = self.pool.acquire().await?;
                     let payout_members = database::get_payout_members(
                         &mut conn,
@@ -173,20 +173,51 @@ impl CoinStaker {
 
                     for pm in payout_members {
                         hm.entry(pm.identity_address.clone())
-                            .and_modify(|bal: &mut StakerBalance| {
+                            .and_modify(|bal: &mut StakerEarnings| {
                                 if pm.txid.is_none() {
                                     bal.pending += pm.reward
                                 } else {
                                     bal.paid += pm.reward
                                 }
                             })
-                            .or_insert(StakerBalance::from(pm));
+                            .or_insert(StakerEarnings::from(pm));
                     }
 
                     if os_tx
-                        .send(hm.drain().collect::<Vec<(Address, StakerBalance)>>())
+                        .send(hm.drain().collect::<Vec<(Address, StakerEarnings)>>())
                         .is_err()
                     {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
+                CoinStakerMessage::GetStakingBalance(os_tx, identity_addresses) => {
+                    let verus_client = self.verusd()?;
+
+                    let utxos =
+                        verus_client.list_unspent(None, None, Some(identity_addresses.as_ref()))?;
+
+                    let payload = utxos
+                        .into_iter()
+                        .filter(|utxo| utxo.amount.is_positive())
+                        .map(|utxo| {
+                            (
+                                utxo.address.unwrap(),
+                                Decimal::from_u64(utxo.amount.to_unsigned().unwrap().as_sat())
+                                    .unwrap(),
+                            )
+                        })
+                        .fold(HashMap::new(), |mut acc, (address, amount)| {
+                            let _ = *acc
+                                .entry(address)
+                                .and_modify(|mut a| a += amount)
+                                .or_insert(amount);
+                            acc
+                        })
+                        .into_iter()
+                        .map(|(k, v)| (k, v.to_f64().unwrap()))
+                        .collect::<Vec<_>>();
+
+                    if os_tx.send(payload).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -659,7 +690,11 @@ pub enum CoinStakerMessage {
         Vec<Address>,
         Option<StakerStatus>,
     ),
-    GetStakerBalance(oneshot::Sender<Vec<(Address, StakerBalance)>>, Vec<Address>),
+    GetStakerEarnings(
+        oneshot::Sender<Vec<(Address, StakerEarnings)>>,
+        Vec<Address>,
+    ),
+    GetStakingBalance(oneshot::Sender<Vec<(Address, f64)>>, Vec<Address>),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
     GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),
     PoolPrimaryAddress(oneshot::Sender<String>),
