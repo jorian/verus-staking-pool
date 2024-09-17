@@ -25,7 +25,8 @@ rust_decimal = "1.35.0"
 secrecy = { version = "0.8", features = ["serde"] }
 url = { version = "2.5.0", features = ["serde"] }
 uuid = { version = "1.8.0", features = ["v4"] }
-vrsc-rpc = { path = "../../rust-vrsc-rpc/client" }
+# vrsc-rpc = { path = "../../rust-vrsc-rpc/client" }
+vrsc-rpc = { git = "https://github.com/jorian/rust-vrsc-rpc" }
 futures-util = "0.3.30"
 
 axum = { version = "0.7.5", features = ["tracing", "macros"] }

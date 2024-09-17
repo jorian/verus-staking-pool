@@ -52,11 +52,13 @@ cd ~/.komodo/VRSC
 nano VRSC.conf
 ```
 
-Add the following config to the file
+Add the following config to the file. You can use the output of this command to create a reasonably secure password:
+
+`cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1`
 
 ```sh
-rpcuser=<a random username>
-rpcpassword=<a random password>
+rpcuser=<a username>
+rpcpassword=<a secure password>
 rpcport=27486
 server=1
 txindex=1
@@ -67,7 +69,7 @@ rpchost=127.0.0.1
 zmqpubhashblock=tcp://127.0.0.1:59790
 ```
 
-Save and exit.
+Make sure to change the user and password fields. Save and exit.
 
 Start the Verus daemon and let it load, it can take 30+ min. 
 
@@ -77,8 +79,11 @@ verusd -daemon
 
 If you have plenty of RAM, start the daemon with the `-fastload` flag.
 
+Let's now set up the staking pool
 
 ### Pool
+
+We are going to install the pool from source.
 
 #### Rust installation
 
@@ -88,7 +93,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 #### Postgres installation
 
-There are many ways to use the postgresql database. You can install it manually, you can use a third party cloud provider like [railway.app](https://railway.app), or you can use Docker, although Docker in production is generally discouraged.
+There are many ways to use a postgresql database. You can install it manually, you can use a third party cloud provider like [railway.app](https://railway.app), or you can use Docker, although Docker in production is generally discouraged, because it adds a layer of complexity.
 
 In a new tmux pane / ssh session, as root:
 
@@ -104,4 +109,65 @@ usermod -aG docker pool
 su - pool
 docker pull postgres:alpine
 ```
+
+Clone this repo:
+```
+cd ~/
+git clone https://github.com/jorian/verus-staking-pool
+```
+
+In the repository that was just cloned, example configuration files have been included. Copy those files to the correct folder and update the files accordingly.
+
+```
+cd ~/verus-staking-pool
+cp coin_config/vrsctest.toml.example coin_config/vrsctest.toml
+cp config/base.json.example config/base.json
+```
+
+In `coin_config/vrsctest.toml` you should update the following fields:
+
+```sh
+- pool_address
+- pool_primary_address 
+- fee
+- min_payout
+- tx_fee
+- rpc_user
+- rpc_password
+- rpc_host
+- rpc_port
+- zmq_port_blocknotify
+```
+
+`pool_address` is the i-address of the identity that is used to collect the staking rewards and to send rewards from to the stakers. The daemon will need to be started with `defaultid=<pool_address>`. It must be a VerusID.
+
+`pool_primary_address` is the R-address that people will use to join the staking pool. It should be an address that is owned by the wallet on the machine
+you're installing the pool on. (Generally, you would go to the verus user, do a `verus getnewaddress`, backup the private key, and use it as the pool's primary address).
+
+Create a new password for the postgres instance and use it in the config file you are about to update
+
+`cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1`
+
+In `config/base.json` you should update the database section to your situation. Use the password you just generated
+as the database password.
+
+Now with that same password, start the postgres instance, replacing `<password>`.
+
+```sh
+docker run --name postgres -e POSTGRES_PASSWORD=<password> -d -p 5432:5432 postgres:alpine
+```
+
+Now, we need to create the database:
+
+`DATABASE_URL=postgres://postgres:<postgres_password>@127.0.0.1:5432/<name of database> cargo sqlx database create`
+
+and apply the migrations
+
+`DATABASE_URL=postgres://postgres:<postgres_password>@127.0.0.1:5432/<name of database> cargo sqlx migrate run --source=pool/sql/migrations`
+
+Everytime you update the pool and new database functionality was added, you need to run this `cargo sqlx migrate run` command.
+
+To be able to compile, we need to use this same DATABASE_URL:
+
+`DATABASE_URL=postgres://postgres:<postgres_password>@127.0.0.1:5432/<name of database> cargo build --release`
 

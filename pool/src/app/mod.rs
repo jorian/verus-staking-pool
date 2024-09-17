@@ -25,7 +25,7 @@ pub struct App {
 impl App {
     pub async fn new(config: Config) -> Result<Self> {
         let pool: PgPool = PoolOptions::new().max_connections(20).connect_lazy_with(
-            PgConnectOptions::new()
+            PgConnectOptions::new_without_pgpass()
                 .host(&config.database.host)
                 .port(config.database.port)
                 .username(&config.database.username)
@@ -120,7 +120,7 @@ impl App {
 
         let (tx, rx) = mpsc::channel(128);
 
-        let config_path: PathBuf = "coin_configs/vrsctest.toml".into();
+        let config_path: PathBuf = "coin_config/vrsctest.toml".into();
         let config = config::Config::builder()
             .add_source(config::File::from(config_path.as_path()))
             .build()?

@@ -1,0 +1,19 @@
+currency_name = "vrsctest"
+currency_id = "iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq"
+pool_address = "iJcwZBwQ1CHDLp9jmFJxi3k6wCMkWk8Cpz"
+pool_primary_address = "RJgnAuLfBwakw6VnBjzqQaksejtX8HEwNG"
+fee = "0.0333"
+min_payout = "100000000"
+tx_fee = "10000"
+webhook_endpoints = ["http://localhost:59791"]
+
+[chain_config]
+rpc_user = "user814172947"
+rpc_password = "passf985842f639c6ece2b1d8e47f0531a07fac6fe77d1dd51f73419e49f0d250a26af"
+rpc_host = "http://127.0.0.1"
+rpc_port = "18843"
+zmq_port_blocknotify = "59999"
+
+[payout_config]
+check_interval_in_secs = 120
+send_interval_in_secs = 600

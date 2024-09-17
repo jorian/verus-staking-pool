@@ -3342,6 +3342,7 @@ dependencies = [
 [[package]]
 name = "vrsc-rpc"
 version = "0.1.20"
+source = "git+https://github.com/jorian/rust-vrsc-rpc#4c19eb0c6b3569bee9e8219b7094ef061e50a3ef"
 dependencies = [
  "dirs",
  "jsonrpc",
@@ -3356,6 +3357,7 @@ dependencies = [
 [[package]]
 name = "vrsc-rpc-json"
 version = "0.1.20"
+source = "git+https://github.com/jorian/rust-vrsc-rpc#4c19eb0c6b3569bee9e8219b7094ef061e50a3ef"
 dependencies = [
  "bitcoin 0.29.2",
  "hex",

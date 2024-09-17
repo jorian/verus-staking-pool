@@ -96,7 +96,7 @@ impl TryFrom<&ChainConfig> for VerusClient {
 
 pub fn get_coin_configurations() -> Result<Vec<Config>> {
     let base_path = std::env::current_dir().expect("Failed to determine the current directory");
-    let config_dir = base_path.join("coin_configs");
+    let config_dir = base_path.join("coin_config");
     let mut coin_settings = vec![];
 
     if let Ok(dir) = config_dir.read_dir() {

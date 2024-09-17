@@ -1,0 +1,12 @@
+{
+    "database": {
+        "host": "localhost",
+        "port": 5432,
+        "username": "postgres",
+        "password": "hAFho2ZSlDstdaEuMCoPEGHwQN8qRQGW"
+    },
+    "application": {
+        "enable_tracing": true,
+        "trace_level": "debug"
+    }
+}

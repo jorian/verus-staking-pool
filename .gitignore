@@ -1,5 +1,5 @@
 /target
 .env
-/coin_configs/*.toml
+/coin_config/*.toml
 /config/*.json
 /bin
