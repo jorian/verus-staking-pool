@@ -2,6 +2,7 @@ use anyhow::Context;
 use axum::Extension;
 use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
+use tracing::debug;
 use vrsc_rpc::json::vrsc::Address;
 
 use crate::coinstaker::coinstaker::CoinStakerMessage;
@@ -35,6 +36,8 @@ pub async fn staking_supply(
     axum_extra::extract::Query(items): axum_extra::extract::Query<Identities>,
 ) -> Result<AppJson<StakingSupply>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<StakingSupply>();
+
+    debug!(?items);
 
     tx.send(CoinStakerMessage::StakingSupply(
         os_tx,

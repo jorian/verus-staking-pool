@@ -13,7 +13,7 @@ The following services are needed in order to run the pool:
 
 ### Server setup
 
-A server with at least 6G of RAM is required, or set some swapspace in case it's around 6G. Or don't start the daemon with fastload, but this significantly increases the startup time (more than 30 minutes)
+A server with at least 10G of RAM is required, or set some swap space in case it's around 8G. (Or don't start the daemon with fastload, but this significantly increases the startup time with at least 45 minutes, depending on how beefy the server hardware is)
 
 ```sh
 apt update
@@ -165,9 +165,16 @@ and apply the migrations
 
 `DATABASE_URL=postgres://postgres:<postgres_password>@127.0.0.1:5432/<name of database> cargo sqlx migrate run --source=pool/sql/migrations`
 
-Everytime you update the pool and new database functionality was added, you need to run this `cargo sqlx migrate run` command.
+Everytime you update the pool and new database functionality was added, you need to run this `cargo sqlx migrate run` command, to make the
+database aware of new changes.
 
-To be able to compile, we need to use this same DATABASE_URL:
+To be able to compile, we need to use this same DATABASE_URL. Let's put it in a `.env` file to make life easier:
 
-`DATABASE_URL=postgres://postgres:<postgres_password>@127.0.0.1:5432/<name of database> cargo build --release`
+```
+echo 'DATABASE_URL=postgres://postgres:<postgres_password>@127.0.0.1:5432/<name of database>' >> .env
+```
+
+Now compile should work.
+
+`cargo build` 
 

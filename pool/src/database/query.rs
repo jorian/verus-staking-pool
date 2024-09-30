@@ -44,6 +44,10 @@ pub async fn get_stakers_by_identity_address(
     currency_address: &Address,
     identity_addresses: &Vec<Address>,
 ) -> Result<Vec<Staker>> {
+    if identity_addresses.is_empty() {
+        return Ok(vec![]);
+    }
+
     let mut query_builder: QueryBuilder<Postgres> = sqlx::QueryBuilder::new(
         "SELECT *
         FROM stakers 

@@ -172,7 +172,9 @@ pub fn prepare_payment<'a>(
 
     let outputs = payout_members_map
         .iter()
-        .map(|(address, amount)| SendCurrencyOutput::new(None, amount, &address.to_string()))
+        .map(|(address, amount)| {
+            SendCurrencyOutput::new(None, amount, &address.to_string(), None, None)
+        })
         .collect::<Vec<_>>();
 
     Ok(outputs)
