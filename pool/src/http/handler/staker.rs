@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+
 use anyhow::Context;
 use axum::{extract::Query, Extension};
 use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
-use tracing::debug;
-use vrsc_rpc::json::vrsc::Address;
+use vrsc_rpc::json::vrsc::{Address, Amount};
 
 use crate::{
     coinstaker::{
@@ -103,8 +104,8 @@ pub async fn get_stakers(
 pub async fn get_staker_earnings(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<Vec<(String, Address)>>,
-) -> Result<AppJson<Vec<(Address, StakerEarnings)>>, AppError> {
-    let (os_tx, os_rx) = oneshot::channel::<Vec<(Address, StakerEarnings)>>();
+) -> Result<AppJson<HashMap<Address, StakerEarnings>>, AppError> {
+    let (os_tx, os_rx) = oneshot::channel::<HashMap<Address, StakerEarnings>>();
 
     let args = args.into_iter().map(|arg| arg.1).collect::<Vec<_>>();
 
@@ -113,8 +114,6 @@ pub async fn get_staker_earnings(
         .context("Could not send Coinstaker message")?;
 
     let map = os_rx.await.context("Sender dropped")?;
-
-    debug!("{:?}", &map);
 
     Ok(AppJson(map))
 }
@@ -125,8 +124,8 @@ pub async fn get_staker_earnings(
 pub async fn get_staking_balance(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
     Query(args): Query<Vec<(String, Address)>>,
-) -> Result<AppJson<Vec<(Address, f64)>>, AppError> {
-    let (os_tx, os_rx) = oneshot::channel::<Vec<(Address, f64)>>();
+) -> Result<AppJson<HashMap<Address, f64>>, AppError> {
+    let (os_tx, os_rx) = oneshot::channel::<HashMap<Address, Amount>>();
 
     let args = args.into_iter().map(|arg| arg.1).collect::<Vec<_>>();
 
@@ -134,7 +133,12 @@ pub async fn get_staking_balance(
         .await
         .context("Could not send Coinstaker message")?;
 
-    let balances = os_rx.await.context("Sender dropped")?;
+    let balances = os_rx
+        .await
+        .context("Sender dropped")?
+        .into_iter()
+        .map(|(k, v)| (k, v.as_vrsc()))
+        .collect();
 
     Ok(AppJson(balances))
 }

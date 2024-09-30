@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use axum::async_trait;
-use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tokio::select;
@@ -12,7 +12,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use vrsc_rpc::bitcoin::BlockHash;
 use vrsc_rpc::client::{Client as VerusClient, RpcApi};
 use vrsc_rpc::json::identity::IdentityPrimary;
-use vrsc_rpc::json::vrsc::Address;
+use vrsc_rpc::json::vrsc::{Address, Amount};
 use vrsc_rpc::json::{Block, ValidationType};
 
 use crate::coinstaker::constants::{Stake, StakeStatus};
@@ -183,10 +183,7 @@ impl CoinStaker {
                             .or_insert(StakerEarnings::from(pm));
                     }
 
-                    if os_tx
-                        .send(hm.drain().collect::<Vec<(Address, StakerEarnings)>>())
-                        .is_err()
-                    {
+                    if os_tx.send(hm).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -199,17 +196,15 @@ impl CoinStaker {
                     let payload = utxos
                         .into_iter()
                         .filter(|utxo| utxo.amount.is_positive())
-                        .map(|utxo| (utxo.address.unwrap(), utxo.amount))
+                        // unwrap because we already filtered the positive
+                        .map(|utxo| (utxo.address.unwrap(), utxo.amount.to_unsigned().unwrap()))
                         .fold(HashMap::new(), |mut acc, (address, amount)| {
                             let _ = *acc
                                 .entry(address)
                                 .and_modify(|a| *a += amount)
                                 .or_insert(amount);
                             acc
-                        })
-                        .into_iter()
-                        .map(|(k, v)| (k, v.as_vrsc()))
-                        .collect::<Vec<_>>();
+                        });
 
                     if os_tx.send(payload).is_err() {
                         Err(anyhow!("the sender dropped"))?
@@ -685,10 +680,10 @@ pub enum CoinStakerMessage {
         Option<StakerStatus>,
     ),
     GetStakerEarnings(
-        oneshot::Sender<Vec<(Address, StakerEarnings)>>,
+        oneshot::Sender<HashMap<Address, StakerEarnings>>,
         Vec<Address>,
     ),
-    GetStakingBalance(oneshot::Sender<Vec<(Address, f64)>>, Vec<Address>),
+    GetStakingBalance(oneshot::Sender<HashMap<Address, Amount>>, Vec<Address>),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
     GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),
     PoolPrimaryAddress(oneshot::Sender<String>),
