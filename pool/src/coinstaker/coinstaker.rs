@@ -199,22 +199,16 @@ impl CoinStaker {
                     let payload = utxos
                         .into_iter()
                         .filter(|utxo| utxo.amount.is_positive())
-                        .map(|utxo| {
-                            (
-                                utxo.address.unwrap(),
-                                Decimal::from_u64(utxo.amount.to_unsigned().unwrap().as_sat())
-                                    .unwrap(),
-                            )
-                        })
+                        .map(|utxo| (utxo.address.unwrap(), utxo.amount))
                         .fold(HashMap::new(), |mut acc, (address, amount)| {
                             let _ = *acc
                                 .entry(address)
-                                .and_modify(|mut a| a += amount)
+                                .and_modify(|a| *a += amount)
                                 .or_insert(amount);
                             acc
                         })
                         .into_iter()
-                        .map(|(k, v)| (k, v.to_f64().unwrap()))
+                        .map(|(k, v)| (k, v.as_vrsc()))
                         .collect::<Vec<_>>();
 
                     if os_tx.send(payload).is_err() {
@@ -470,7 +464,7 @@ impl CoinStaker {
     /// Addresses that are given but not known in this pool will return 0.
     async fn get_staking_supply(&self, identity_addresses: Vec<Address>) -> Result<StakingSupply> {
         let verus_client = self.verusd()?;
-        let block_height = verus_client.get_mining_info()?.blocks;
+        let block_height = verus_client.get_blockchain_info()?.blocks;
 
         // let active_addresses = identity_addresses
         let stakers = database::get_stakers_by_identity_address(
