@@ -107,7 +107,7 @@ apt-get update
 apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
 usermod -aG docker pool
 su - pool
-docker pull postgres:alpine
+docker pull postgres:17-alpine
 ```
 
 Clone this repo:
@@ -154,7 +154,7 @@ as the database password.
 Now with that same password, start the postgres instance, replacing `<password>`.
 
 ```sh
-docker run --name postgres -e POSTGRES_PASSWORD=<password> -d -p 5432:5432 postgres:alpine
+docker run --name postgres -e POSTGRES_PASSWORD=<password> -d -p 5432:5432 postgres:17-alpine
 ```
 
 Now, we need to create the database:

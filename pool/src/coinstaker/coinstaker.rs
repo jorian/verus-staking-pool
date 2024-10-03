@@ -532,6 +532,13 @@ impl CoinStaker {
         identity_address: &Address,
     ) -> Result<Option<Staker>> {
         let identity = client.get_identity(&identity_address.to_string())?;
+        let currency = client.get_currency(&self.chain_id.to_string())?;
+
+        // if the chain has IDSTAKING enabled, check if this staker has a root id for this chain
+        // if not, it's not eligible.
+        if identity.identity.systemid != self.chain_id && currency.options & 0b100 != 0 {
+            return Ok(None);
+        }
 
         if let Some(mut staker) = database::get_staker(
             &self.pool,
