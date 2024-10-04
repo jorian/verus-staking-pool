@@ -16,7 +16,7 @@ use vrsc_rpc::json::vrsc::{Address, Amount};
 use vrsc_rpc::json::{Block, ValidationType};
 
 use crate::coinstaker::constants::{Stake, StakeStatus};
-use crate::database;
+use crate::database::{self, get_stakers_by_identity_address};
 use crate::http::constants::StakingSupply;
 use crate::payout_service::PayoutMember;
 use crate::util::verus::*;
@@ -190,8 +190,25 @@ impl CoinStaker {
                 CoinStakerMessage::GetStakingBalance(os_tx, identity_addresses) => {
                     let verus_client = self.verusd()?;
 
-                    let utxos =
-                        verus_client.list_unspent(None, None, Some(identity_addresses.as_ref()))?;
+                    let active_addresses = get_stakers_by_identity_address(
+                        &self.pool,
+                        &self.chain_id,
+                        &identity_addresses,
+                    )
+                    .await?
+                    .iter()
+                    .map(|staker| staker.identity_address.clone())
+                    .collect::<Vec<_>>();
+
+                    let utxos = if !active_addresses.is_empty() {
+                        verus_client.list_unspent(
+                            Some(150),
+                            None,
+                            Some(active_addresses.as_ref()),
+                        )?
+                    } else {
+                        vec![]
+                    };
 
                     let payload = utxos
                         .into_iter()
