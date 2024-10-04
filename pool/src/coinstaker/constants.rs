@@ -73,6 +73,7 @@ impl TryFrom<String> for StakerStatus {
     fn try_from(value: String) -> Result<Self, Self::Error> {
         match value.as_ref() {
             "ACTIVE" => Ok(Self::Active),
+            "COOLING_DOWN" => Ok(Self::CoolingDown),
             "INACTIVE" => Ok(Self::Inactive),
             _ => Err(anyhow!("Unexpected StakerStatus")),
         }

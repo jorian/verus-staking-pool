@@ -514,7 +514,7 @@ impl CoinStaker {
                 0,
                 99999999,
             )?;
-            if identity.blockheight < block.height.saturating_sub(150) as i64 {
+            if identity.blockheight < block.height.saturating_sub(6) as i64 {
                 trace!(?cooling_down_staker, "id has cooled down, activate");
                 cooling_down_staker.status = StakerStatus::Active;
                 database::store_staker(&self.pool, &cooling_down_staker).await?;
@@ -626,11 +626,6 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
         let client = self.verusd()?;
 
         // some preflight checks are needed:
-
-        // if daemon is not staking, the work will not be counted towards shares
-        if !client.get_mining_info()?.staking {
-            warn!(coin = %self.config.currency_name, "daemon is not staking, staker work will not be accumulated");
-        }
 
         tokio::spawn(super::zmq::tmq_block_listen(
             self.config.chain_config.zmq_port_blocknotify,
