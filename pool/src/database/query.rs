@@ -5,7 +5,6 @@ use anyhow::Result;
 use sqlx::postgres::PgRow;
 use sqlx::types::Decimal;
 use sqlx::{PgConnection, PgPool, Postgres, QueryBuilder, Row, Transaction};
-use tracing::debug;
 use vrsc_rpc::bitcoin::Txid;
 use vrsc_rpc::json::vrsc::{Address, Amount};
 
@@ -144,7 +143,6 @@ pub async fn store_work(
     let mut tx = pool.begin().await?;
 
     for (staker_address, shares) in payload {
-        debug!(?staker_address, ?shares, "creating query");
         sqlx::query_file!(
             "sql/store_work.sql",
             currency_address.to_string(),

@@ -495,7 +495,7 @@ impl CoinStaker {
                 {
                     let block = verus_client.get_block_by_height(block_height, 2).unwrap();
 
-                    identity.blockheight < block.height.saturating_sub(150) as i64
+                    identity.blockheight < block.height.saturating_sub(6) as i64
                 } else {
                     false
                 };
