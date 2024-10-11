@@ -613,6 +613,51 @@ pub async fn set_txid_payment_member(
     Ok(())
 }
 
+pub async fn get_number_of_matured_stakes(
+    conn: &PgPool,
+    currency_address: &Address,
+) -> Result<i64> {
+    let res: Option<i64> = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM stakes WHERE currency_address = $1 AND status = 'MATURED'",
+        currency_address.to_string()
+    )
+    .fetch_one(conn)
+    .await?;
+
+    Ok(res.unwrap_or(0))
+}
+
+pub async fn get_number_of_active_stakers(
+    conn: &PgPool,
+    currency_address: &Address,
+) -> Result<i64> {
+    let res: Option<i64> = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM stakers WHERE currency_address = $1 AND status = 'ACTIVE'",
+        currency_address.to_string()
+    )
+    .fetch_one(conn)
+    .await?;
+
+    Ok(res.unwrap_or(0))
+}
+
+pub async fn get_total_rewards(conn: &PgPool, currency_address: &Address) -> Result<Amount> {
+    let res: Option<Amount> = sqlx::query!(
+        "SELECT SUM(reward)::bigint as total 
+        FROM payout_members 
+        WHERE 
+            currency_address = $1 AND 
+            txid is not null",
+        currency_address.to_string()
+    )
+    .fetch_one(conn)
+    .await?
+    .total
+    .map(|r| Amount::from_sat(r as u64));
+
+    Ok(res.unwrap_or(Amount::ZERO))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -16,8 +16,11 @@ use vrsc_rpc::json::vrsc::{Address, Amount};
 use vrsc_rpc::json::{Block, ValidationType};
 
 use crate::coinstaker::constants::{Stake, StakeStatus};
-use crate::database::{self, get_stakers_by_identity_address};
-use crate::http::constants::StakingSupply;
+use crate::database::{
+    self, get_number_of_active_stakers, get_number_of_matured_stakes,
+    get_stakers_by_identity_address, get_total_rewards,
+};
+use crate::http::constants::{StakingSupply, Stats};
 use crate::payout_service::PayoutMember;
 use crate::util::verus::*;
 
@@ -238,6 +241,27 @@ impl CoinStaker {
                     let verus_client = self.verusd()?;
 
                     verus_client.set_generate(enable_staking, 0)?;
+                }
+                CoinStakerMessage::GetStatistics(os_tx) => {
+                    let (stakes, stakers, rewards) = tokio::try_join!(
+                        get_number_of_matured_stakes(&self.pool, &self.chain_id),
+                        get_number_of_active_stakers(&self.pool, &self.chain_id),
+                        get_total_rewards(&self.pool, &self.chain_id)
+                    )?;
+
+                    let pool_staking_supply =
+                        self.verusd()?.get_wallet_info()?.eligible_staking_balance;
+
+                    let stats = Stats {
+                        stakes,
+                        pool_staking_supply,
+                        paid: rewards,
+                        stakers,
+                    };
+
+                    if os_tx.send(stats).is_err() {
+                        Err(anyhow!("the sender dropped"))?
+                    }
                 }
             }
         }
@@ -642,25 +666,22 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
         info!("starting coinstaker {}", self.config.currency_name);
         let client = self.verusd()?;
 
-        // some preflight checks are needed:
-
         tokio::spawn(super::zmq::tmq_block_listen(
             self.config.chain_config.zmq_port_blocknotify,
             self.tx.clone(),
         ));
 
+        // some preflight checks are needed:
         if let Some(mut last_height) = database::get_last_height(&self.pool, &self.chain_id).await?
         {
             trace!(%last_height, "Do some preflight checks");
 
-            last_height += 1;
             let chain_tip = client.get_blockchain_info()?.blocks;
 
             for i in last_height..=chain_tip {
                 let block = client.get_block_by_height(i, 2)?;
 
                 self.check_stakers(&client, &block).await?;
-
                 last_height += 1;
             }
 
@@ -705,6 +726,7 @@ pub enum CoinStakerMessage {
     GetStakingBalance(oneshot::Sender<HashMap<Address, Amount>>, Vec<Address>),
     GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
     GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),
+    GetStatistics(oneshot::Sender<Stats>),
     PoolPrimaryAddress(oneshot::Sender<String>),
     SetStaking(bool),
 }

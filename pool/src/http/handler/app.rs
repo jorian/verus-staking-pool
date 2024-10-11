@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     coinstaker::coinstaker::CoinStakerMessage,
-    http::{handler::AppJson, routing::AppState},
+    http::{constants::Stats, handler::AppJson, routing::AppState},
 };
 
 use super::AppError;
@@ -31,4 +31,18 @@ pub async fn pool_primary_address(
     let res = os_rx.await.context("Sender dropped")?;
 
     Ok(AppJson(res))
+}
+
+pub async fn statistics(
+    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+) -> Result<AppJson<Stats>, AppError> {
+    let (os_tx, os_rx) = oneshot::channel::<Stats>();
+
+    tx.send(CoinStakerMessage::GetStatistics(os_tx))
+        .await
+        .context("Could not send Coinstaker message")?;
+
+    let stats = os_rx.await.context("Sender dropped")?;
+
+    Ok(AppJson(stats))
 }
