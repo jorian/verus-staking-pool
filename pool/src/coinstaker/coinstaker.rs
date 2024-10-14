@@ -16,6 +16,7 @@ use vrsc_rpc::json::vrsc::{Address, Amount};
 use vrsc_rpc::json::{Block, ValidationType};
 
 use crate::coinstaker::constants::{Stake, StakeStatus};
+use crate::coinstaker::http::WebhookMessage;
 use crate::database::{
     self, get_number_of_active_stakers, get_number_of_matured_stakes,
     get_stakers_by_identity_address, get_total_rewards,
@@ -26,6 +27,7 @@ use crate::util::verus::*;
 
 use super::config::Config as CoinstakerConfig;
 use super::constants::{Staker, StakerEarnings};
+use super::http::Webhook;
 use super::StakerStatus;
 
 #[derive(Debug)]
@@ -35,6 +37,7 @@ pub struct CoinStaker {
     tx: mpsc::Sender<CoinStakerMessage>,
     rx: mpsc::Receiver<CoinStakerMessage>,
     pub chain_id: Address,
+    webhooks: Webhook,
 }
 
 impl CoinStaker {
@@ -44,6 +47,7 @@ impl CoinStaker {
         tx: mpsc::Sender<CoinStakerMessage>,
         rx: mpsc::Receiver<CoinStakerMessage>,
     ) -> Result<Self> {
+        let webhooks = Webhook::new(config.webhook_endpoints.clone())?;
         let chain_id = config.currency_id.clone();
 
         Ok(Self {
@@ -52,6 +56,7 @@ impl CoinStaker {
             tx,
             rx,
             chain_id,
+            webhooks,
         })
     }
 
@@ -307,6 +312,13 @@ impl CoinStaker {
 
                 stake.status = StakeStatus::Matured;
                 database::store_stake(&self.pool, &stake).await?;
+
+                self.webhooks
+                    .send(WebhookMessage::StakeMatured {
+                        hash: stake.block_hash,
+                        height: stake.block_height,
+                    })
+                    .await?;
             }
         }
         // get pending stakes from database
@@ -396,9 +408,18 @@ impl CoinStaker {
     #[instrument(skip(self))]
     async fn check_for_stake(&self, block_hash: &BlockHash) -> Result<()> {
         if let Some(stake) = self.is_stake(block_hash).await? {
-            info!(height = %stake.block_height, "stake found");
+            info!(height = %stake.block_height, ">>>>>>>>>>>>>>> stake found");
 
             database::store_new_stake(&self.pool, &stake).await?;
+
+            let client = self.verusd()?;
+            let currency_name = client
+                .get_currency(&stake.currency_address.to_string())?
+                .fullyqualifiedname;
+
+            self.webhooks
+                .send(WebhookMessage::new_stake(currency_name, &stake))
+                .await?;
         }
 
         Ok(())
@@ -558,7 +579,15 @@ impl CoinStaker {
             if identity.blockheight < block.height.saturating_sub(6) as i64 {
                 trace!(?cooling_down_staker, "id has cooled down, activate");
                 cooling_down_staker.status = StakerStatus::Active;
+
                 database::store_staker(&self.pool, &cooling_down_staker).await?;
+
+                self.webhooks
+                    .send(WebhookMessage::NewStaker {
+                        identity_address: cooling_down_staker.identity_address,
+                        identity_name: cooling_down_staker.identity_name,
+                    })
+                    .await?;
             } else {
                 trace!(?cooling_down_staker, "staker still cooling down");
             }
@@ -597,16 +626,9 @@ impl CoinStaker {
                         staker.status = StakerStatus::Inactive;
                         database::store_staker(&self.pool, &staker).await?;
                     } else {
-                        // if it is active, but it updated their id, staking rules
-                        // prevent it from staking for 150 blocks.
-                        // need to set a cooldown period
-
                         staker.status = StakerStatus::CoolingDown;
                         database::store_staker(&self.pool, &staker).await?;
                     }
-
-                    // if staker is not eligible anymore, deactivate
-                    // TODO self.webhooks.send(deactivated)
                 }
                 StakerStatus::CoolingDown => {
                     // an update was made to a staker that was already cooling down.
@@ -623,9 +645,16 @@ impl CoinStaker {
                         staker.status = StakerStatus::CoolingDown;
                         database::store_staker(&self.pool, &staker).await?;
                     }
-                    // if staker became eligible, reactivate
-                    // TODO self.webhooks.send(activated)
                 }
+            }
+
+            if staker.status == StakerStatus::Inactive {
+                self.webhooks
+                    .send(WebhookMessage::LeavingStaker {
+                        identity_address: staker.identity_address.clone(),
+                        identity_name: staker.identity_name.clone(),
+                    })
+                    .await?;
             }
 
             return Ok(Some(staker));
@@ -646,7 +675,6 @@ impl CoinStaker {
                 trace!("new staker stored in database.");
 
                 return Ok(Some(staker));
-                // TODO self.webhooks.send(activated)
             } else {
                 trace!(id = &identity.fullyqualifiedname, "verusid not eligible");
             }
