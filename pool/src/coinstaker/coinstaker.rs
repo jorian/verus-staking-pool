@@ -17,10 +17,7 @@ use vrsc_rpc::json::{Block, ValidationType};
 
 use crate::coinstaker::constants::{Stake, StakeStatus};
 use crate::coinstaker::http::WebhookMessage;
-use crate::database::{
-    self, get_number_of_active_stakers, get_number_of_matured_stakes,
-    get_stakers_by_identity_address, get_total_rewards,
-};
+use crate::database;
 use crate::http::constants::{StakingSupply, Stats};
 use crate::payout_service::PayoutMember;
 use crate::util::verus::*;
@@ -198,7 +195,7 @@ impl CoinStaker {
                 CoinStakerMessage::GetStakingBalance(os_tx, identity_addresses) => {
                     let verus_client = self.verusd()?;
 
-                    let active_addresses = get_stakers_by_identity_address(
+                    let active_addresses = database::get_stakers_by_identity_address(
                         &self.pool,
                         &self.chain_id,
                         &identity_addresses,
@@ -249,9 +246,9 @@ impl CoinStaker {
                 }
                 CoinStakerMessage::GetStatistics(os_tx) => {
                     let (stakes, stakers, rewards) = tokio::try_join!(
-                        get_number_of_matured_stakes(&self.pool, &self.chain_id),
-                        get_number_of_active_stakers(&self.pool, &self.chain_id),
-                        get_total_rewards(&self.pool, &self.chain_id)
+                        database::get_number_of_matured_stakes(&self.pool, &self.chain_id),
+                        database::get_number_of_active_stakers(&self.pool, &self.chain_id),
+                        database::get_total_rewards(&self.pool, &self.chain_id)
                     )?;
 
                     let pool_staking_supply =
@@ -318,7 +315,7 @@ impl CoinStaker {
                         hash: stake.block_hash,
                         height: stake.block_height,
                     })
-                    .await?;
+                    .await;
             }
         }
         // get pending stakes from database
@@ -419,7 +416,7 @@ impl CoinStaker {
 
             self.webhooks
                 .send(WebhookMessage::new_stake(currency_name, &stake))
-                .await?;
+                .await;
         }
 
         Ok(())
@@ -587,7 +584,7 @@ impl CoinStaker {
                         identity_address: cooling_down_staker.identity_address,
                         identity_name: cooling_down_staker.identity_name,
                     })
-                    .await?;
+                    .await;
             } else {
                 trace!(?cooling_down_staker, "staker still cooling down");
             }
@@ -654,7 +651,7 @@ impl CoinStaker {
                         identity_address: staker.identity_address.clone(),
                         identity_name: staker.identity_name.clone(),
                     })
-                    .await?;
+                    .await;
             }
 
             return Ok(Some(staker));
@@ -699,25 +696,28 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
             self.tx.clone(),
         ));
 
-        // some preflight checks are needed:
-        if let Some(mut last_height) = database::get_last_height(&self.pool, &self.chain_id).await?
-        {
-            trace!(%last_height, "Do some preflight checks");
+        if !self.config.skip_preflight {
+            // some preflight checks are needed:
+            if let Some(mut last_height) =
+                database::get_last_height(&self.pool, &self.chain_id).await?
+            {
+                trace!(%last_height, "Do some preflight checks");
 
-            let chain_tip = client.get_blockchain_info()?.blocks;
+                let chain_tip = client.get_blockchain_info()?.blocks;
 
-            for i in last_height..=chain_tip {
-                let block = client.get_block_by_height(i, 2)?;
+                for i in last_height..=chain_tip {
+                    let block = client.get_block_by_height(i, 2)?;
 
-                self.check_stakers(&client, &block).await?;
-                last_height += 1;
+                    self.check_stakers(&client, &block).await?;
+                    last_height += 1;
+                }
+
+                self.check_maturing_stakes(&client).await?;
+
+                trace!(%last_height, "Finished doing preflight checks");
+
+                database::update_last_height(&self.pool, &self.chain_id, last_height).await?;
             }
-
-            self.check_maturing_stakes(&client).await?;
-
-            trace!(%last_height, "Finished doing preflight checks");
-
-            database::update_last_height(&self.pool, &self.chain_id, last_height).await?;
         }
 
         select! {

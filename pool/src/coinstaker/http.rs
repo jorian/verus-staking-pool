@@ -25,16 +25,18 @@ impl Webhook {
         Ok(Self { client, endpoints })
     }
 
-    pub async fn send(&self, msg: WebhookMessage) -> Result<()> {
+    pub async fn send(&self, msg: WebhookMessage) {
         for endpoint in self.endpoints.iter() {
-            self.client
+            if let Err(e) = self
+                .client
                 .post(endpoint.clone().join("/webhook").unwrap())
                 .json(&WebhookBody::from(msg.clone()))
                 .send()
-                .await?;
+                .await
+            {
+                tracing::error!(error = ?e, "Could not send webhook message");
+            }
         }
-
-        Ok(())
     }
 }
 

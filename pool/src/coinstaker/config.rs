@@ -25,6 +25,8 @@ pub struct Config {
     pub webhook_endpoints: Vec<Url>,
     pub chain_config: ChainConfig,
     pub payout_config: PayoutConfig,
+    #[serde(default)]
+    pub skip_preflight: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
