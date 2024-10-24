@@ -173,7 +173,7 @@ mod tests {
     use sqlx::PgPool;
     use std::str::FromStr;
 
-    use crate::database;
+    use crate::database::{self, get_unpaid_payout_members};
 
     use super::*;
 
@@ -286,6 +286,22 @@ mod tests {
         assert!(payout.members.contains(&bob));
 
         Ok(())
+    }
+
+    #[sqlx::test(
+        fixtures("stakes", "stakers", "payout_members"),
+        migrator = "crate::MIGRATOR"
+    )]
+    async fn test_get_unpaid_payout_members(pool: PgPool) {
+        let mut conn = pool.acquire().await.unwrap();
+        let currency_address = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let pms = get_unpaid_payout_members(&mut conn, &currency_address)
+            .await
+            .unwrap();
+
+        dbg!(pms);
+        // need to insert a couple of payout_members that both fulfill and not
+        // fulfill the min_payout limit.
     }
 } /*
 

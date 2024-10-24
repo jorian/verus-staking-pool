@@ -84,6 +84,7 @@ impl Service {
     async fn send_unsent_payouts(&self) -> Result<()> {
         let mut tx = self.database.begin().await?;
 
+        // NB: these are already filtered on min_payout settings
         let unpaid_payout_members =
             database::get_unpaid_payout_members(&mut tx, &self.chain_id).await?;
 

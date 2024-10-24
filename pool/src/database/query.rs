@@ -602,8 +602,13 @@ pub async fn set_txid_payment_member(
     txid: &Txid,
 ) -> Result<()> {
     sqlx::query!(
-        "UPDATE payout_members SET txid = $3 WHERE currency_address = $1 AND block_height = $2",
+        "UPDATE payout_members 
+        SET txid = $4 
+        WHERE currency_address = $1 AND 
+            identity_address = $2 AND 
+            block_height = $3",
         payout_member.currency_address.to_string(),
+        payout_member.identity_address.to_string(),
         payout_member.block_height as i64,
         txid.to_string()
     )
