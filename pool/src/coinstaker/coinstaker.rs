@@ -71,7 +71,7 @@ impl CoinStaker {
             trace!(?msg, "received new ZMQ message");
             match msg {
                 CoinStakerMessage::Block(block_hash) => {
-                    // 1. check subscription of currenctly active subscribers.
+                    // 1. check subscription of currently active subscribers.
                     // 2. check if any pending stakes have matured
                     // 3. check if daemon is staking
                     // 4. add work
@@ -286,7 +286,12 @@ impl CoinStaker {
                 stake.status = StakeStatus::Stale;
                 database::store_stake(&self.pool, &stake).await?;
 
-                // TODO send webhook message
+                self.webhooks
+                    .send(WebhookMessage::StakeStale {
+                        hash: stake.block_hash,
+                        height: stake.block_height,
+                    })
+                    .await;
 
                 return Ok(());
             }

@@ -34,13 +34,13 @@ impl Webhook {
                 .send()
                 .await
             {
-                tracing::error!(error = ?e, "Could not send webhook message");
+                tracing::error!(error = ?e, ?msg, "Could not send webhook message");
             }
         }
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookMessage {
     StakeFound {
@@ -53,6 +53,10 @@ pub enum WebhookMessage {
         amount: Amount,
     },
     StakeMatured {
+        hash: BlockHash,
+        height: u64,
+    },
+    StakeStale {
         hash: BlockHash,
         height: u64,
     },
@@ -84,6 +88,7 @@ impl Display for WebhookMessage {
         match self {
             WebhookMessage::StakeFound { .. } => write!(f, "stake_found"),
             WebhookMessage::StakeMatured { .. } => write!(f, "stake_matured"),
+            WebhookMessage::StakeStale { .. } => write!(f, "stake_stale"),
             WebhookMessage::NewStaker { .. } => write!(f, "new_staker"),
             WebhookMessage::LeavingStaker { .. } => write!(f, "leaving_staker"),
         }
