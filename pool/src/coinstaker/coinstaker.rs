@@ -630,9 +630,20 @@ impl CoinStaker {
                         trace!(?identity, "a change to this verusid made it inactive");
                         staker.status = StakerStatus::Inactive;
                         database::store_staker(&self.pool, &staker).await?;
-                    } else {
-                        staker.status = StakerStatus::CoolingDown;
-                        database::store_staker(&self.pool, &staker).await?;
+
+                        self.webhooks
+                            .send(WebhookMessage::LeavingStaker {
+                                identity_address: staker.identity_address.clone(),
+                                identity_name: staker.identity_name.clone(),
+                            })
+                            .await;
+                        // TODO any change to a verusid was supposed to set eligibility for
+                        // staking to false, so we would have to wait for that time to pass.
+                        // but this doesn't seem to be the case, at least not for some kinds
+                        // of upgrade. Needs investigating.
+                        // } else {
+                        // staker.status = StakerStatus::CoolingDown;
+                        // database::store_staker(&self.pool, &staker).await?;
                     }
                 }
                 StakerStatus::CoolingDown => {
@@ -651,15 +662,6 @@ impl CoinStaker {
                         database::store_staker(&self.pool, &staker).await?;
                     }
                 }
-            }
-
-            if staker.status == StakerStatus::Inactive {
-                self.webhooks
-                    .send(WebhookMessage::LeavingStaker {
-                        identity_address: staker.identity_address.clone(),
-                        identity_name: staker.identity_name.clone(),
-                    })
-                    .await;
             }
 
             return Ok(Some(staker));
