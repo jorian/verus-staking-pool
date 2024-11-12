@@ -608,7 +608,10 @@ impl CoinStaker {
 
         // if the chain has IDSTAKING enabled, check if this staker has a root id for this chain
         // if not, it's not eligible.
-        if identity.identity.systemid != self.chain_id && currency.options & 0b100 != 0 {
+        if currency.options & 0b100 != 0
+            && (identity.identity.systemid != self.chain_id
+                || identity.identity.parent != self.chain_id)
+        {
             return Ok(None);
         }
 
