@@ -21,7 +21,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     tracing_subscriber::registry()
         .with(filter_layer)
-        .with(fmt::Layer::default())
+        .with(fmt::Layer::default().with_line_number(true).with_file(true))
         .with(
             fmt::Layer::new()
                 .json()
