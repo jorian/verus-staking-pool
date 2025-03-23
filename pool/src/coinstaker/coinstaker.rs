@@ -91,7 +91,22 @@ impl CoinStaker {
                         StakerStatus::Active,
                     )
                     .await?;
-                    self.check_stakers(&verus_client, &block).await?;
+                    self.check_stakers(
+                        &verus_client,
+                        block
+                            .tx
+                            .iter()
+                            .flat_map(|tx| {
+                                tx.vout.iter().filter_map(|vout| {
+                                    vout.script_pubkey
+                                        .identityprimary
+                                        .clone()
+                                        .map(|idp| idp.identityaddress)
+                                })
+                            })
+                            .collect(),
+                    )
+                    .await?;
                     self.check_maturing_stakes(&verus_client).await?;
 
                     if self.daemon_is_staking(&verus_client).await? == false {
@@ -558,19 +573,20 @@ impl CoinStaker {
         Ok(staking_supply)
     }
 
-    async fn check_stakers(&self, verus_client: &VerusClient, block: &Block) -> Result<()> {
-        for tx in &block.tx {
-            for vout in &tx.vout {
-                if let Some(identity_primary) = &vout.script_pubkey.identityprimary {
-                    self.check_staker_status(verus_client, &identity_primary.identityaddress)
-                        .await?;
-                }
-            }
+    async fn check_stakers(
+        &self,
+        verus_client: &VerusClient,
+        identity_address: Vec<Address>,
+    ) -> Result<()> {
+        for address in identity_address {
+            self.check_staker_status(verus_client, &address).await?;
         }
 
         let cooling_down_stakers =
             database::get_stakers_by_status(&self.pool, &self.chain_id, StakerStatus::CoolingDown)
                 .await?;
+
+        let height = verus_client.get_blockchain_info()?.blocks;
 
         for mut cooling_down_staker in cooling_down_stakers {
             let identity = verus_client.get_identity_history(
@@ -578,7 +594,7 @@ impl CoinStaker {
                 0,
                 99999999,
             )?;
-            if identity.blockheight < block.height.saturating_sub(6) as i64 {
+            if identity.blockheight < height.saturating_sub(6) as i64 {
                 trace!(?cooling_down_staker, "id has cooled down, activate");
                 cooling_down_staker.status = StakerStatus::Active;
 
@@ -706,6 +722,19 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
             self.tx.clone(),
         ));
 
+        let identities_with_address = client
+            .get_identities_with_address(
+                &self.config.pool_primary_address.to_string(),
+                Some(3400000),
+                None,
+                None,
+            )?
+            .into_iter()
+            .map(|idp| idp.identityaddress)
+            .collect();
+
+        self.check_stakers(&client, identities_with_address).await?;
+
         if !self.config.skip_preflight {
             // some preflight checks are needed:
             if let Some(mut last_height) =
@@ -718,7 +747,20 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
                 for i in last_height..=chain_tip {
                     let block = client.get_block_by_height(i, 2)?;
 
-                    self.check_stakers(&client, &block).await?;
+                    let identities = block
+                        .tx
+                        .into_iter()
+                        .flat_map(|tx| {
+                            tx.vout.into_iter().filter_map(|vout| {
+                                vout.script_pubkey
+                                    .identityprimary
+                                    .map(|idp| idp.identityaddress)
+                            })
+                        })
+                        .collect();
+
+                    self.check_stakers(&client, identities).await?;
+
                     last_height += 1;
                 }
 
