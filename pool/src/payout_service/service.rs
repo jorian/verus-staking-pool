@@ -12,7 +12,7 @@ use vrsc_rpc::{
 };
 
 use crate::{
-    coinstaker::{ChainConfig, PayoutConfig as PayoutServiceConfig},
+    coinstaker::{constants::Stake, ChainConfig, PayoutConfig as PayoutServiceConfig},
     database::{self},
 };
 
@@ -41,6 +41,28 @@ impl Service {
             pool_address,
             chain_config,
         }
+    }
+
+    async fn new_manual_payout(&self, stake: &Stake) -> Result<()> {
+        let workers =
+            database::get_workers_by_round(&self.database, &self.chain_id, stake.block_height)
+                .await?;
+
+        let mut tx = self.database.begin().await?;
+
+        let payout = Payout::new(&stake, workers, Decimal::ZERO)?;
+
+        database::store_payout(&mut tx, &payout).await?;
+
+        for member in payout.members {
+            database::store_payout_member(&mut tx, &member).await?;
+        }
+
+        database::update_last_payout_height(&mut tx, &self.chain_id, stake.block_height).await?;
+
+        tx.commit().await?;
+
+        Ok(())
     }
 
     async fn new_payout(&self) -> Result<()> {

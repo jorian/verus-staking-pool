@@ -211,6 +211,48 @@ async fn move_work_to_new_round(
     Ok(())
 }
 
+/*INSERT INTO work(
+    currency_address,
+    round,
+    staker_address,
+    shares
+) VALUES ($1, $2, $3, $4)
+ON CONFLICT ON CONSTRAINT work_pkey
+DO UPDATE
+SET shares = work.shares + EXCLUDED.shares
+WHERE work.currency_address = EXCLUDED.currency_address
+    AND work.round = EXCLUDED.round
+    AND work.staker_address = EXCLUDED.staker_address
+ */
+
+// keeps the work in `from_round`
+async fn copy_work_to_new_round(
+    tx: &mut Transaction<'_, Postgres>,
+    currency_address: &Address,
+    from_round: u64,
+    to_round: u64,
+    staker_address: &Address,
+) -> Result<()> {
+    sqlx::query!(
+        "WITH round_to_copy AS (
+            SELECT shares
+            FROM work 
+            WHERE currency_address = $1 AND round = $2
+        )
+        INSERT INTO work (currency_address, round, staker_address, shares) 
+        SELECT $1, $3, $4, shares
+        FROM round_to_copy",
+        currency_address.to_string(),
+        from_round as i64,
+        to_round as i64,
+        staker_address.to_string()
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn get_stake(
     pool: &PgPool,
     currency_address: &Address,
@@ -239,10 +281,21 @@ pub async fn get_stake(
     Ok(value)
 }
 
-pub async fn store_new_stake(pool: &PgPool, stake: &Stake) -> Result<()> {
+pub async fn store_new_stake(pool: &PgPool, stake: &Stake, move_work: bool) -> Result<()> {
     let mut tx = pool.begin().await?;
 
-    move_work_to_new_round(&mut tx, &stake.currency_address, 0, stake.block_height).await?;
+    if move_work {
+        move_work_to_new_round(&mut tx, &stake.currency_address, 0, stake.block_height).await?;
+    } else {
+        copy_work_to_new_round(
+            &mut tx,
+            &stake.currency_address,
+            0,
+            stake.block_height,
+            &stake.found_by,
+        )
+        .await?;
+    }
 
     sqlx::query_file!(
         "sql/store_stake.sql",

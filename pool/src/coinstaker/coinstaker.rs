@@ -17,10 +17,10 @@ use vrsc_rpc::json::{Block, ValidationType};
 
 use crate::coinstaker::constants::{Stake, StakeStatus};
 use crate::coinstaker::http::WebhookMessage;
-use crate::database;
 use crate::http::constants::{StakingSupply, Stats};
 use crate::payout_service::PayoutMember;
 use crate::util::verus::*;
+use crate::{database, payout_service};
 
 use super::config::Config as CoinstakerConfig;
 use super::constants::{Staker, StakerEarnings};
@@ -280,6 +280,13 @@ impl CoinStaker {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
+                CoinStakerMessage::CheckBlockManually(os_tx, height) => {
+                    let block_hash = self.verusd()?.get_block_by_height(height, 1)?.hash;
+                    if let Some(stake) = self.is_stake(&block_hash).await? {
+                        // this is an after the fact stake, don't move the round but copy from 0
+                        database::store_new_stake(&self.pool, &stake, false).await?;
+                    }
+                }
             }
         }
 
@@ -427,7 +434,7 @@ impl CoinStaker {
         if let Some(stake) = self.is_stake(block_hash).await? {
             info!(height = %stake.block_height, ">>>>>>>>>>>>>>> stake found");
 
-            database::store_new_stake(&self.pool, &stake).await?;
+            database::store_new_stake(&self.pool, &stake, true).await?;
 
             let client = self.verusd()?;
             let currency_name = client
@@ -775,15 +782,16 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
         select! {
             _ = subsys.on_shutdown_requested() => {
                 info!("shutting down coinstaker, disable staking");
-
-                disable_staking(self.verusd()?)?;
             },
             r = self.listen() => {
-                warn!("stopped listening");
+                error!("main event loop stopped");
                 if let Err(e) = r { error!("{e:?}") }
             },
 
         }
+
+        // if pool stops, stop staking
+        disable_staking(self.verusd()?)?;
 
         Ok(())
     }
@@ -809,4 +817,5 @@ pub enum CoinStakerMessage {
     GetStatistics(oneshot::Sender<Stats>),
     PoolPrimaryAddress(oneshot::Sender<String>),
     SetStaking(bool),
+    CheckBlockManually(oneshot::Sender<()>, u64),
 }

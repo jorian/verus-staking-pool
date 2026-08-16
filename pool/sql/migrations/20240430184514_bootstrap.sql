@@ -1,4 +1,3 @@
-
 CREATE TYPE staker_status AS ENUM (
     'ACTIVE',
     'COOLING_DOWN',
