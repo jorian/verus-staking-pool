@@ -54,9 +54,11 @@ impl App {
                 coin_config.payout_config,
                 self.pool.clone(),
                 currency_id.clone(),
+                coin_config.currency_name.clone(),
                 coin_config.pool_address.clone(),
                 coin_config.chain_config.clone(),
-            );
+                coin_config.webhook_endpoints.clone(),
+            )?;
             coin_staker_payouts.push((currency_id.clone(), payout));
 
             if start_staking {

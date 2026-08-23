@@ -5,6 +5,7 @@ use anyhow::Result;
 use sqlx::postgres::PgRow;
 use sqlx::types::Decimal;
 use sqlx::{PgConnection, PgPool, Postgres, QueryBuilder, Row, Transaction};
+use uuid::Uuid;
 use vrsc_rpc::bitcoin::Txid;
 use vrsc_rpc::json::vrsc::{Address, Amount};
 
@@ -620,6 +621,7 @@ pub async fn get_unpaid_payout_members(
             FROM payout_members
             WHERE currency_address = $1
                 AND txid is NULL
+                AND payment_batch_id IS NULL
             GROUP BY currency_address, identity_address
         )
         SELECT 
@@ -635,6 +637,7 @@ pub async fn get_unpaid_payout_members(
         JOIN pm_sum ON pm.currency_address = pm_sum.currency_address
             AND pm.identity_address = pm_sum.identity_address
             AND pm.txid IS NULL
+            AND pm.payment_batch_id IS NULL
         JOIN stakers s ON pm.currency_address = s.currency_address
             AND pm.identity_address = s.identity_address
         WHERE pm_sum.total_rewards > s.min_payout 
@@ -643,29 +646,158 @@ pub async fn get_unpaid_payout_members(
         currency_address.to_string(),
     )
     .try_map(PayoutMember::try_from)
-    .fetch_all(conn)
+    .fetch_all(&mut *conn)
     .await?;
 
     Ok(values)
 }
 
-pub async fn set_txid_payment_member(
-    conn: &mut PgConnection,
-    payout_member: &PayoutMember,
-    txid: &Txid,
-) -> Result<()> {
-    sqlx::query!(
-        "UPDATE payout_members 
-        SET txid = $4 
-        WHERE currency_address = $1 AND 
-            identity_address = $2 AND 
-            block_height = $3",
-        payout_member.currency_address.to_string(),
-        payout_member.identity_address.to_string(),
-        payout_member.block_height as i64,
-        txid.to_string()
+pub struct InFlightPayoutBatch {
+    pub batch_id: Uuid,
+    pub opid: Option<String>,
+    pub members: Vec<PayoutMember>,
+}
+
+struct DbInFlightPayoutMember {
+    currency_address: String,
+    identity_address: String,
+    block_hash: String,
+    block_height: i64,
+    shares: Decimal,
+    reward: i64,
+    fee: i64,
+    txid: Option<String>,
+    payment_batch_id: Uuid,
+    payment_opid: Option<String>,
+}
+
+pub async fn get_in_flight_payout_batches(
+    pool: &PgPool,
+    currency_address: &Address,
+) -> Result<Vec<InFlightPayoutBatch>> {
+    let rows = sqlx::query_as!(
+        DbInFlightPayoutMember,
+        r#"SELECT
+            currency_address,
+            identity_address,
+            block_hash,
+            block_height,
+            shares,
+            reward,
+            fee,
+            txid,
+            payment_batch_id AS "payment_batch_id!",
+            payment_opid
+        FROM payout_members
+        WHERE currency_address = $1
+            AND txid IS NULL
+            AND payment_batch_id IS NOT NULL
+        ORDER BY payment_batch_id"#,
+        currency_address.to_string(),
     )
-    .execute(&mut *conn)
+    .fetch_all(pool)
+    .await?;
+
+    let mut batches: HashMap<Uuid, InFlightPayoutBatch> = HashMap::new();
+    for row in rows {
+        let member = PayoutMember::try_from(DbPayoutMember {
+            currency_address: row.currency_address,
+            identity_address: row.identity_address,
+            block_hash: row.block_hash,
+            block_height: row.block_height,
+            shares: row.shares,
+            reward: row.reward,
+            fee: row.fee,
+            txid: row.txid,
+        })?;
+
+        batches
+            .entry(row.payment_batch_id)
+            .and_modify(|batch| batch.members.push(member.clone()))
+            .or_insert_with(|| InFlightPayoutBatch {
+                batch_id: row.payment_batch_id,
+                opid: row.payment_opid.clone(),
+                members: vec![member],
+            });
+    }
+
+    Ok(batches.into_values().collect())
+}
+
+pub async fn claim_payout_members(
+    conn: &mut PgConnection,
+    batch_id: Uuid,
+    members: &[PayoutMember],
+) -> Result<()> {
+    for member in members {
+        let result = sqlx::query!(
+            r#"UPDATE payout_members
+            SET payment_batch_id = $1
+            WHERE currency_address = $2
+                AND identity_address = $3
+                AND block_hash = $4
+                AND txid IS NULL
+                AND payment_batch_id IS NULL"#,
+            batch_id,
+            member.currency_address.to_string(),
+            member.identity_address.to_string(),
+            member.block_hash.to_string(),
+        )
+        .execute(&mut *conn)
+        .await?;
+
+        if result.rows_affected() != 1 {
+            anyhow::bail!(
+                "failed to claim payout member {} at height {}",
+                member.identity_address,
+                member.block_height
+            );
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn set_payment_opid_for_batch(pool: &PgPool, batch_id: Uuid, opid: &str) -> Result<()> {
+    sqlx::query!(
+        r#"UPDATE payout_members
+        SET payment_opid = $2
+        WHERE payment_batch_id = $1
+            AND txid IS NULL"#,
+        batch_id,
+        opid,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn set_txid_for_batch(pool: &PgPool, batch_id: Uuid, txid: &Txid) -> Result<()> {
+    sqlx::query!(
+        r#"UPDATE payout_members
+        SET txid = $2
+        WHERE payment_batch_id = $1
+            AND txid IS NULL"#,
+        batch_id,
+        txid.to_string(),
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn unclaim_payout_batch(pool: &PgPool, batch_id: Uuid) -> Result<()> {
+    sqlx::query!(
+        r#"UPDATE payout_members
+        SET payment_batch_id = NULL,
+            payment_opid = NULL
+        WHERE payment_batch_id = $1
+            AND txid IS NULL"#,
+        batch_id,
+    )
+    .execute(pool)
     .await?;
 
     Ok(())
@@ -791,5 +923,131 @@ mod tests {
         assert!(shares.is_sign_positive());
 
         assert_eq!(shares, Decimal::from_f32_retain(5.0).unwrap());
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn claimed_members_are_excluded_from_unpaid(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let identity = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let block_hash = "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0";
+
+        sqlx::query(
+            "INSERT INTO stakers (
+                currency_address, identity_address, identity_name, status, min_payout, fee
+            ) VALUES ($1, $2, 'alice', 'ACTIVE', 0, 0)",
+        )
+        .bind(currency.to_string())
+        .bind(identity.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO payout_members (
+                currency_address, identity_address, block_hash, block_height,
+                shares, reward, fee, txid
+            ) VALUES ($1, $2, $3, 1, 1, 100000000, 0, NULL)",
+        )
+        .bind(currency.to_string())
+        .bind(identity.to_string())
+        .bind(block_hash)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let unpaid = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        assert_eq!(unpaid.len(), 1);
+
+        let batch_id = Uuid::new_v4();
+        claim_payout_members(&mut tx, batch_id, &unpaid)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let unpaid_after = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        tx.commit().await.unwrap();
+        assert!(unpaid_after.is_empty());
+
+        let in_flight = get_in_flight_payout_batches(&pool, &currency)
+            .await
+            .unwrap();
+        assert_eq!(in_flight.len(), 1);
+        assert_eq!(in_flight[0].batch_id, batch_id);
+        assert!(in_flight[0].opid.is_none());
+
+        set_payment_opid_for_batch(&pool, batch_id, "opid-test")
+            .await
+            .unwrap();
+        let in_flight = get_in_flight_payout_batches(&pool, &currency)
+            .await
+            .unwrap();
+        assert_eq!(in_flight[0].opid.as_deref(), Some("opid-test"));
+
+        let txid =
+            Txid::from_str("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+                .unwrap();
+        set_txid_for_batch(&pool, batch_id, &txid).await.unwrap();
+
+        let in_flight = get_in_flight_payout_batches(&pool, &currency)
+            .await
+            .unwrap();
+        assert!(in_flight.is_empty());
+
+        let mut tx = pool.begin().await.unwrap();
+        let unpaid_paid = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        tx.commit().await.unwrap();
+        assert!(unpaid_paid.is_empty());
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn unclaim_returns_members_to_unpaid(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let identity = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let block_hash = "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0";
+
+        sqlx::query(
+            "INSERT INTO stakers (
+                currency_address, identity_address, identity_name, status, min_payout, fee
+            ) VALUES ($1, $2, 'alice', 'INACTIVE', 100000000, 0)",
+        )
+        .bind(currency.to_string())
+        .bind(identity.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO payout_members (
+                currency_address, identity_address, block_hash, block_height,
+                shares, reward, fee, txid
+            ) VALUES ($1, $2, $3, 1, 1, 1, 0, NULL)",
+        )
+        .bind(currency.to_string())
+        .bind(identity.to_string())
+        .bind(block_hash)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let unpaid = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        let batch_id = Uuid::new_v4();
+        claim_payout_members(&mut tx, batch_id, &unpaid)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        unclaim_payout_batch(&pool, batch_id).await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let unpaid = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(unpaid.len(), 1);
+        assert!(get_in_flight_payout_batches(&pool, &currency)
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

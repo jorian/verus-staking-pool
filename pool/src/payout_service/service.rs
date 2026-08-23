@@ -1,29 +1,44 @@
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tokio_graceful_shutdown::{IntoSubsystem, SubsystemHandle};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
+use uuid::Uuid;
 use vrsc_rpc::{
     bitcoin::Txid,
     client::{Client, RpcApi, SendCurrencyOutput},
-    json::vrsc::{Address, Amount},
+    json::{vrsc::Address, vrsc::Amount, ZOperationStatusResult},
 };
 
 use crate::{
-    coinstaker::{constants::Stake, ChainConfig, PayoutConfig as PayoutServiceConfig},
-    database::{self},
+    coinstaker::{
+        constants::Stake,
+        http::{PayoutStuckMember, Webhook, WebhookMessage},
+        ChainConfig, PayoutConfig as PayoutServiceConfig,
+    },
+    database::{self, InFlightPayoutBatch},
 };
 
 use super::{payout::Payout, PayoutMember};
+
+const SENDCURRENCY_WAIT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const SENDCURRENCY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub struct Service {
     database: PgPool,
     config: PayoutServiceConfig,
     chain_id: Address,
+    currency_name: String,
     pool_address: Address,
     chain_config: ChainConfig,
+    webhooks: Webhook,
+    notified_stuck_batches: Mutex<HashSet<Uuid>>,
 }
 
 impl Service {
@@ -31,16 +46,21 @@ impl Service {
         config: PayoutServiceConfig,
         database: PgPool,
         chain_id: Address,
+        currency_name: String,
         pool_address: Address,
         chain_config: ChainConfig,
-    ) -> Self {
-        Self {
+        webhook_endpoints: Vec<url::Url>,
+    ) -> Result<Self> {
+        Ok(Self {
             database,
             config,
             chain_id,
+            currency_name,
             pool_address,
             chain_config,
-        }
+            webhooks: Webhook::new(webhook_endpoints)?,
+            notified_stuck_batches: Mutex::new(HashSet::new()),
+        })
     }
 
     async fn new_manual_payout(&self, stake: &Stake) -> Result<()> {
@@ -104,6 +124,22 @@ impl Service {
     }
 
     async fn send_unsent_payouts(&self) -> Result<()> {
+        let in_flight =
+            database::get_in_flight_payout_batches(&self.database, &self.chain_id).await?;
+
+        if !in_flight.is_empty() {
+            if in_flight.len() > 1 {
+                error!(
+                    n_batches = in_flight.len(),
+                    "multiple in-flight payout batches; not starting a new send"
+                );
+            }
+            for batch in in_flight {
+                self.resume_in_flight(batch).await?;
+            }
+            return Ok(());
+        }
+
         let mut tx = self.database.begin().await?;
 
         // NB: these are already filtered on min_payout settings
@@ -111,30 +147,185 @@ impl Service {
             database::get_unpaid_payout_members(&mut tx, &self.chain_id).await?;
 
         if unpaid_payout_members.is_empty() {
+            tx.commit().await?;
             return Ok(());
         }
 
+        let batch_id = Uuid::new_v4();
+        database::claim_payout_members(&mut tx, batch_id, &unpaid_payout_members).await?;
+        tx.commit().await?;
+
         let outputs = prepare_payment(&unpaid_payout_members)?;
+        debug!(n_outputs = outputs.len(), ?outputs, "sending outputs");
+        let client: Client = (&self.chain_config).try_into()?;
 
-        let client: vrsc_rpc::client::Client = (&self.chain_config).try_into()?;
-        if let Some(txid) = send_payment(outputs, &self.pool_address, &client).await? {
-            for member in unpaid_payout_members.iter() {
-                if let Err(e) = database::set_txid_payment_member(&mut tx, member, &txid).await {
-                    error!(failed_member = ?member);
-                    error!(?unpaid_payout_members);
-                    error!(?txid);
-                    error!(?e);
-
-                    bail!("A payment was sent but the database failed to update.");
-                };
+        let opid = match client.send_currency(&self.pool_address.to_string(), outputs, None, None) {
+            Ok(opid) => opid,
+            Err(e) => {
+                error!(%batch_id, error = ?e, "sendcurrency RPC failed before an opid was returned; unclaiming");
+                database::unclaim_payout_batch(&self.database, batch_id).await?;
+                return Err(e.into());
             }
+        };
 
-            tx.commit().await?;
+        database::set_payment_opid_for_batch(&self.database, batch_id, &opid).await?;
 
-            info!(?txid, "Sent payment");
+        self.finish_submitted_batch(batch_id, &opid).await
+    }
+
+    async fn resume_in_flight(&self, batch: InFlightPayoutBatch) -> Result<()> {
+        let Some(opid) = batch.opid.as_deref() else {
+            error!(
+                batch_id = %batch.batch_id,
+                n_members = batch.members.len(),
+                members = ?batch.members.iter().map(|m| m.identity_address.to_string()).collect::<Vec<_>>(),
+                "payout batch claimed with no daemon opid; refusing to send again"
+            );
+            self.notify_stuck_batch(&batch, "claimed_without_opid")
+                .await;
+            return Ok(());
+        };
+
+        let client: Client = (&self.chain_config).try_into()?;
+        let operation_status = client.z_get_operation_status(vec![opid])?;
+
+        match classify_operation_status(operation_status.first().and_then(|s| s.as_ref())) {
+            OperationOutcome::Pending => {
+                info!(batch_id = %batch.batch_id, opid, "resuming in-flight sendcurrency");
+                self.finish_submitted_batch(batch.batch_id, opid).await
+            }
+            OperationOutcome::Success(txid) => {
+                database::set_txid_for_batch(&self.database, batch.batch_id, &txid).await?;
+                info!(?txid, batch_id = %batch.batch_id, "in-flight sendcurrency already succeeded");
+                Ok(())
+            }
+            OperationOutcome::Failed(msg) => {
+                error!(batch_id = %batch.batch_id, opid, error = %msg, "in-flight sendcurrency failed; unclaiming");
+                database::unclaim_payout_batch(&self.database, batch.batch_id).await?;
+                Ok(())
+            }
+            OperationOutcome::Unknown => {
+                error!(
+                    batch_id = %batch.batch_id,
+                    opid,
+                    "daemon does not know this opid (restarted?); refusing to send again"
+                );
+                self.notify_stuck_batch(&batch, "unknown_opid").await;
+                Ok(())
+            }
+        }
+    }
+
+    async fn finish_submitted_batch(&self, batch_id: Uuid, opid: &str) -> Result<()> {
+        let client: Client = (&self.chain_config).try_into()?;
+
+        match wait_for_sendcurrency_finish(&client, opid).await {
+            Ok(txid) => {
+                database::set_txid_for_batch(&self.database, batch_id, &txid).await?;
+                info!(?txid, %batch_id, "Sent payment");
+                Ok(())
+            }
+            Err(WaitError::Failed(msg)) => {
+                error!(%batch_id, opid, error = %msg, "sendcurrency failed; unclaiming for retry");
+                database::unclaim_payout_batch(&self.database, batch_id).await?;
+                Ok(())
+            }
+            Err(WaitError::Timeout) => {
+                warn!(%batch_id, opid, "sendcurrency wait timed out; will resume later");
+                Ok(())
+            }
+            Err(WaitError::Rpc(e)) => {
+                error!(%batch_id, opid, error = ?e, "sendcurrency status RPC failed; will resume later");
+                Ok(())
+            }
+        }
+    }
+
+    async fn notify_stuck_batch(&self, batch: &InFlightPayoutBatch, reason: &str) {
+        {
+            let notified = self.notified_stuck_batches.lock().unwrap();
+            if notified.contains(&batch.batch_id) {
+                return;
+            }
         }
 
-        Ok(())
+        let client: Result<Client> = (&self.chain_config).try_into();
+        let (daemon_operation, other_daemon_operations) = match (&batch.opid, client) {
+            (Some(opid), Ok(client)) => {
+                let this_op = client
+                    .z_get_operation_status(vec![opid.as_str()])
+                    .ok()
+                    .and_then(|ops| ops.into_iter().next().flatten())
+                    .and_then(|op| serde_json::to_value(&op).ok());
+
+                let others = client
+                    .z_get_operation_status(vec![])
+                    .ok()
+                    .map(|ops| {
+                        ops.into_iter()
+                            .flatten()
+                            .filter(|op| Some(op.id.as_str()) != batch.opid.as_deref())
+                            .filter_map(|op| serde_json::to_value(&op).ok())
+                            .take(20)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
+                (this_op, others)
+            }
+            (None, Ok(client)) => {
+                let others = client
+                    .z_get_operation_status(vec![])
+                    .ok()
+                    .map(|ops| {
+                        ops.into_iter()
+                            .flatten()
+                            .filter_map(|op| serde_json::to_value(&op).ok())
+                            .take(20)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                (None, others)
+            }
+            (_, Err(e)) => {
+                error!(error = ?e, "could not query daemon while building stuck-payout alert");
+                (None, vec![])
+            }
+        };
+
+        let msg = WebhookMessage::PayoutSendStuck {
+            currency_address: self.chain_id.clone(),
+            currency_name: self.currency_name.clone(),
+            payment_batch_id: batch.batch_id,
+            payment_opid: batch.opid.clone(),
+            reason: reason.to_string(),
+            daemon_operation,
+            other_daemon_operations,
+            members: batch
+                .members
+                .iter()
+                .map(|m| PayoutStuckMember {
+                    identity_address: m.identity_address.clone(),
+                    block_hash: m.block_hash,
+                    block_height: m.block_height,
+                    reward: m.reward,
+                })
+                .collect(),
+        };
+
+        error!(
+            batch_id = %batch.batch_id,
+            opid = ?batch.opid,
+            reason,
+            n_members = batch.members.len(),
+            "alerting admins: payout send is stuck and needs manual investigation"
+        );
+
+        self.webhooks.send(msg).await;
+        self.notified_stuck_batches
+            .lock()
+            .unwrap()
+            .insert(batch.batch_id);
     }
 
     async fn keep_creating_payouts(&self, subsys: &SubsystemHandle) -> Result<()> {
@@ -156,8 +347,6 @@ impl Service {
         while !subsys.is_shutdown_requested() {
             if let Err(e) = self.send_unsent_payouts().await {
                 error!(error = ?e, "Failed to send payment");
-
-                bail!("Failed to send payments");
             }
 
             tokio::select! {
@@ -203,51 +392,75 @@ pub fn prepare_payment<'a>(
     Ok(outputs)
 }
 
-pub async fn send_payment<'a>(
-    outputs: Vec<SendCurrencyOutput<'a>>,
-    pool_address: &Address,
-    client: &Client,
-) -> Result<Option<Txid>> {
-    debug!(n_outputs = outputs.len(), ?outputs, "sending outputs");
-    let opid = client.send_currency(&pool_address.to_string(), outputs, None, None)?;
-
-    if let Some(txid) = wait_for_sendcurrency_finish(client, &opid).await? {
-        return Ok(Some(txid));
-    }
-
-    Ok(None)
+#[derive(Debug)]
+enum WaitError {
+    Failed(String),
+    Timeout,
+    Rpc(anyhow::Error),
 }
 
-async fn wait_for_sendcurrency_finish(client: &Client, opid: &str) -> Result<Option<Txid>> {
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum OperationOutcome {
+    Pending,
+    Success(Txid),
+    Failed(String),
+    Unknown,
+}
+
+pub(crate) fn classify_operation_status(
+    status: Option<&ZOperationStatusResult>,
+) -> OperationOutcome {
+    let Some(opstatus) = status else {
+        return OperationOutcome::Unknown;
+    };
+
+    match opstatus.status.as_str() {
+        "queued" | "executing" => OperationOutcome::Pending,
+        "success" => match opstatus.result.as_ref() {
+            Some(result) => OperationOutcome::Success(result.txid),
+            None => OperationOutcome::Failed("success status without txid".to_string()),
+        },
+        "failed" => {
+            let msg = opstatus
+                .error
+                .as_ref()
+                .map(|e| format!("{} (code {})", e.message, e.code))
+                .unwrap_or_else(|| "failed".to_string());
+            OperationOutcome::Failed(msg)
+        }
+        other => OperationOutcome::Failed(format!("unexpected status: {other}")),
+    }
+}
+
+async fn wait_for_sendcurrency_finish(client: &Client, opid: &str) -> Result<Txid, WaitError> {
     // from https://buildmedia.readthedocs.org/media/pdf/zcash/english-docs/zcash.pdf
     // status can be one of queued, executing, failed or success.
-    // we should sleep if status is one of queued or executing
-    // we should return when status is one of failed or success.
+    let deadline = Instant::now() + SENDCURRENCY_WAIT_TIMEOUT;
+
     loop {
+        if Instant::now() >= deadline {
+            return Err(WaitError::Timeout);
+        }
+
         trace!("getting operation status: {}", &opid);
-        let operation_status = client.z_get_operation_status(vec![opid])?;
+        let operation_status = client
+            .z_get_operation_status(vec![opid])
+            .map_err(|e| WaitError::Rpc(e.into()))?;
         trace!("got operation status: {:?}", &operation_status);
 
-        if let Some(Some(opstatus)) = operation_status.first() {
-            if ["queued", "executing"].contains(&opstatus.status.as_ref()) {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                trace!("opid still executing");
-                continue;
+        match classify_operation_status(operation_status.first().and_then(|s| s.as_ref())) {
+            OperationOutcome::Pending => {
+                tokio::time::sleep(SENDCURRENCY_POLL_INTERVAL).await;
             }
-
-            if let Some(txid) = &opstatus.result {
-                trace!(
-                    "there was an operation_status, operation was executed with status: {}",
-                    opstatus.status
-                );
-
-                return Ok(Some(txid.txid));
-            } else {
-                error!("execution failed with status: {}", opstatus.status);
+            OperationOutcome::Success(txid) => return Ok(txid),
+            OperationOutcome::Failed(msg) => return Err(WaitError::Failed(msg)),
+            OperationOutcome::Unknown => {
+                // The op may not have shown up yet immediately after sendcurrency.
+                if Instant::now() + SENDCURRENCY_POLL_INTERVAL >= deadline {
+                    return Err(WaitError::Timeout);
+                }
+                tokio::time::sleep(SENDCURRENCY_POLL_INTERVAL).await;
             }
-        } else {
-            trace!("there was NO operation_status");
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 }
@@ -261,5 +474,86 @@ impl IntoSubsystem<anyhow::Error> for Service {
         )?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+    use vrsc_rpc::json::{
+        ZOperationStatusResult, ZOperationStatusResultError, ZOperationStatusResultTxid,
+    };
+
+    fn opstatus(status: &str) -> ZOperationStatusResult {
+        ZOperationStatusResult {
+            id: "opid-test".to_string(),
+            status: status.to_string(),
+            creation_time: 0,
+            result: None,
+            error: None,
+            execution_secs: None,
+            method: "sendcurrency".to_string(),
+            params: vec![],
+        }
+    }
+
+    #[test]
+    fn queued_and_executing_are_pending() {
+        assert_eq!(
+            classify_operation_status(Some(&opstatus("queued"))),
+            OperationOutcome::Pending
+        );
+        assert_eq!(
+            classify_operation_status(Some(&opstatus("executing"))),
+            OperationOutcome::Pending
+        );
+    }
+
+    #[test]
+    fn missing_status_is_unknown() {
+        assert_eq!(classify_operation_status(None), OperationOutcome::Unknown);
+    }
+
+    #[test]
+    fn success_requires_txid() {
+        let mut success = opstatus("success");
+        assert!(matches!(
+            classify_operation_status(Some(&success)),
+            OperationOutcome::Failed(_)
+        ));
+
+        let txid =
+            Txid::from_str("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+                .unwrap();
+        success.result = Some(ZOperationStatusResultTxid { txid });
+        assert_eq!(
+            classify_operation_status(Some(&success)),
+            OperationOutcome::Success(txid)
+        );
+    }
+
+    #[test]
+    fn failed_includes_error_message() {
+        let mut failed = opstatus("failed");
+        failed.error = Some(ZOperationStatusResultError {
+            code: -1,
+            message: "insufficient funds".to_string(),
+        });
+        match classify_operation_status(Some(&failed)) {
+            OperationOutcome::Failed(msg) => {
+                assert!(msg.contains("insufficient funds"));
+                assert!(msg.contains("-1"));
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unexpected_status_is_failed() {
+        assert!(matches!(
+            classify_operation_status(Some(&opstatus("cancelled"))),
+            OperationOutcome::Failed(_)
+        ));
     }
 }

@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use serde::Serialize;
 use url::Url;
+use uuid::Uuid;
 use vrsc_rpc::{
     bitcoin::BlockHash,
     json::vrsc::{util::amount::serde::as_sat, Address, Amount},
@@ -12,7 +13,7 @@ use vrsc_rpc::{
 use super::constants::Stake;
 
 // send webhook message to registered endpoints
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Webhook {
     client: reqwest::Client,
     endpoints: Vec<Url>,
@@ -68,6 +69,26 @@ pub enum WebhookMessage {
         identity_address: Address,
         identity_name: String,
     },
+    /// Admin alert: a payout batch is stuck and must be investigated by hand.
+    PayoutSendStuck {
+        currency_address: Address,
+        currency_name: String,
+        payment_batch_id: Uuid,
+        payment_opid: Option<String>,
+        reason: String,
+        daemon_operation: Option<serde_json::Value>,
+        other_daemon_operations: Vec<serde_json::Value>,
+        members: Vec<PayoutStuckMember>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PayoutStuckMember {
+    pub identity_address: Address,
+    pub block_hash: BlockHash,
+    pub block_height: u64,
+    #[serde(with = "as_sat")]
+    pub reward: Amount,
 }
 
 impl WebhookMessage {
@@ -91,6 +112,7 @@ impl Display for WebhookMessage {
             WebhookMessage::StakeStale { .. } => write!(f, "stake_stale"),
             WebhookMessage::NewStaker { .. } => write!(f, "new_staker"),
             WebhookMessage::LeavingStaker { .. } => write!(f, "leaving_staker"),
+            WebhookMessage::PayoutSendStuck { .. } => write!(f, "payout_send_stuck"),
         }
     }
 }

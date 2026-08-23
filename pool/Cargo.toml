@@ -24,7 +24,7 @@ reqwest = { version = "0.12.4", features = ["json"] }
 rust_decimal = "1.35.0"
 secrecy = { version = "0.8", features = ["serde"] }
 url = { version = "2.5.0", features = ["serde"] }
-uuid = { version = "1.8.0", features = ["v4"] }
+uuid = { version = "1.8.0", features = ["v4", "serde"] }
 vrsc-rpc = { path = "../../rust-vrsc-rpc/client" }
 # vrsc-rpc = { git = "https://github.com/jorian/rust-vrsc-rpc" }
 futures-util = "0.3.30"

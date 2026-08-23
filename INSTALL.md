@@ -165,8 +165,14 @@ and apply the migrations
 
 `DATABASE_URL=postgres://postgres:<postgres_password>@127.0.0.1:5432/<name of database> cargo sqlx migrate run --source=pool/sql/migrations`
 
-Everytime you update the pool and new database functionality was added, you need to run this `cargo sqlx migrate run` command, to make the
+Every time you update the pool and new database functionality was added, you need to run this `cargo sqlx migrate run` command, to make the
 database aware of new changes.
+
+Migrations are reversible (`*.up.sql` / `*.down.sql` pairs). To undo the latest applied migration:
+
+`DATABASE_URL=postgres://postgres:<postgres_password>@127.0.0.1:5432/<name of database> cargo sqlx migrate revert --source=pool/sql/migrations`
+
+New reversible migrations: `cargo sqlx migrate add -r --source pool/sql/migrations <name>`
 
 To be able to compile, we need to use this same DATABASE_URL. Let's put it in a `.env` file to make life easier:
 
