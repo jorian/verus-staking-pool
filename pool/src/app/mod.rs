@@ -11,7 +11,6 @@ use crate::{
     payout_service,
 };
 use anyhow::Result;
-use secrecy::ExposeSecret;
 use sqlx::{pool::PoolOptions, postgres::PgConnectOptions, PgPool};
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{IntoSubsystem, SubsystemBuilder, Toplevel};
@@ -24,14 +23,17 @@ pub struct App {
 #[cfg(not(feature = "mock"))]
 impl App {
     pub async fn new(config: Config) -> Result<Self> {
-        let pool: PgPool = PoolOptions::new().max_connections(20).connect_lazy_with(
-            PgConnectOptions::new_without_pgpass()
-                .host(&config.database.host)
-                .port(config.database.port)
-                .username(&config.database.username)
-                .database(&config.database.name)
-                .password(config.database.password.expose_secret()),
-        );
+        let mut connect = PgConnectOptions::new_without_pgpass()
+            .host(&config.database.host)
+            .port(config.database.port)
+            .username(&config.database.username)
+            .database(&config.database.name);
+        if let Some(password) = config.database.password() {
+            connect = connect.password(password);
+        }
+        let pool: PgPool = PoolOptions::new()
+            .max_connections(20)
+            .connect_lazy_with(connect);
 
         Ok(Self { pool, config })
     }
@@ -100,14 +102,17 @@ impl App {
 #[cfg(feature = "mock")]
 impl App {
     pub async fn new(config: Config) -> Result<Self> {
-        let pool: PgPool = PoolOptions::new().max_connections(1).connect_lazy_with(
-            PgConnectOptions::new()
-                .host(&config.database.host)
-                .port(config.database.port)
-                .username(&config.database.username)
-                .database(&config.database.name)
-                .password(config.database.password.expose_secret()),
-        );
+        let mut connect = PgConnectOptions::new()
+            .host(&config.database.host)
+            .port(config.database.port)
+            .username(&config.database.username)
+            .database(&config.database.name);
+        if let Some(password) = config.database.password() {
+            connect = connect.password(password);
+        }
+        let pool: PgPool = PoolOptions::new()
+            .max_connections(1)
+            .connect_lazy_with(connect);
 
         Ok(Self { pool, config })
     }

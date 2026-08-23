@@ -20,33 +20,44 @@ pub struct AppConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct DbConfig {
     pub username: String,
-    pub password: Secret<String>,
+    /// Omit or leave empty for passwordless (trust) Postgres on localhost.
+    #[serde(default)]
+    pub password: Option<Secret<String>>,
     pub port: u16,
     pub host: String,
     pub name: String,
 }
 
 impl DbConfig {
+    pub fn password(&self) -> Option<&str> {
+        self.password
+            .as_ref()
+            .map(|p| p.expose_secret().as_str())
+            .filter(|p| !p.is_empty())
+    }
+
     pub fn connection_string(&self) -> String {
-        format!(
-            "postgres://{}:{}@{}:{}/{}",
-            self.username,
-            self.password.expose_secret(),
-            self.host,
-            self.port,
-            self.name
-        )
+        match self.password() {
+            Some(password) => format!(
+                "postgres://{}:{}@{}:{}/{}",
+                self.username, password, self.host, self.port, self.name
+            ),
+            None => format!(
+                "postgres://{}@{}:{}/{}",
+                self.username, self.host, self.port, self.name
+            ),
+        }
     }
 
     #[allow(unused)]
     pub fn connection_string_without_db(&self) -> String {
-        format!(
-            "postgres://{}:{}@{}:{}",
-            self.username,
-            self.password.expose_secret(),
-            self.host,
-            self.port
-        )
+        match self.password() {
+            Some(password) => format!(
+                "postgres://{}:{}@{}:{}",
+                self.username, password, self.host, self.port
+            ),
+            None => format!("postgres://{}@{}:{}", self.username, self.host, self.port),
+        }
     }
 }
 
