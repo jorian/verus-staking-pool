@@ -17,7 +17,7 @@ use vrsc_rpc::json::{Block, ValidationType};
 
 use crate::coinstaker::constants::{Stake, StakeStatus};
 use crate::coinstaker::http::WebhookMessage;
-use crate::http::constants::{StakingSupply, Stats};
+use crate::http::constants::{StakingSupply, Stats, WorkShare};
 use crate::payout_service::PayoutMember;
 use crate::util::verus::*;
 use crate::{database, payout_service};
@@ -136,13 +136,10 @@ impl CoinStaker {
                         .expect("a oneshot message failed to send");
                 }
                 CoinStakerMessage::GetStakers(os_tx, identity_addresses, staker_status) => {
-                    let staker = if let Some(status) = staker_status {
-                        // TODO build a better query for this:
-                        database::get_stakers_by_status(&self.pool, &self.chain_id, status)
-                            .await?
-                            .into_iter()
-                            .filter(|s| identity_addresses.contains(&s.identity_address))
-                            .collect::<Vec<_>>()
+                    let mut stakers = if let Some(status) = staker_status {
+                        database::get_stakers_by_status(&self.pool, &self.chain_id, status).await?
+                    } else if identity_addresses.is_empty() {
+                        database::get_all_stakers(&self.pool, &self.chain_id).await?
                     } else {
                         database::get_stakers_by_identity_address(
                             &self.pool,
@@ -151,25 +148,50 @@ impl CoinStaker {
                         )
                         .await?
                     };
-                    if os_tx.send(staker).is_err() {
+                    if !identity_addresses.is_empty() {
+                        stakers.retain(|s| identity_addresses.contains(&s.identity_address));
+                    }
+                    if os_tx.send(stakers).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
-                CoinStakerMessage::GetPayouts(os_tx, identity_addresses) => {
-                    let mut conn = self.pool.acquire().await?;
-                    let payout_members = database::get_payout_members(
-                        &mut conn,
-                        &self.chain_id,
-                        &identity_addresses,
-                    )
-                    .await?;
+                CoinStakerMessage::GetPayouts(os_tx, identity_addresses, limit, before_height) => {
+                    let payout_members = if limit.is_some() || before_height.is_some() {
+                        database::get_payout_members_page(
+                            &self.pool,
+                            &self.chain_id,
+                            &identity_addresses,
+                            before_height,
+                            limit.unwrap_or(200),
+                        )
+                        .await?
+                    } else if identity_addresses.is_empty() {
+                        database::get_all_payout_members(&self.pool, &self.chain_id).await?
+                    } else {
+                        let mut conn = self.pool.acquire().await?;
+                        database::get_payout_members(
+                            &mut conn,
+                            &self.chain_id,
+                            &identity_addresses,
+                        )
+                        .await?
+                    };
 
                     if os_tx.send(payout_members).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
-                CoinStakerMessage::GetStakes(os_tx, stake_status) => {
-                    let stakes = if let Some(status) = stake_status {
+                CoinStakerMessage::GetStakes(os_tx, stake_status, limit, before_height) => {
+                    let stakes = if limit.is_some() || before_height.is_some() {
+                        database::get_stakes_page(
+                            &self.pool,
+                            &self.chain_id,
+                            stake_status,
+                            before_height,
+                            limit.unwrap_or(200),
+                        )
+                        .await?
+                    } else if let Some(status) = stake_status {
                         database::get_stakes_by_status(&self.pool, &self.chain_id, status, None)
                             .await?
                     } else {
@@ -177,6 +199,12 @@ impl CoinStaker {
                     };
 
                     if os_tx.send(stakes).is_err() {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
+                CoinStakerMessage::GetWork(os_tx) => {
+                    let work = database::get_work(&self.pool, &self.chain_id).await?;
+                    if os_tx.send(work).is_err() {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
@@ -210,15 +238,27 @@ impl CoinStaker {
                 CoinStakerMessage::GetStakingBalance(os_tx, identity_addresses) => {
                     let verus_client = self.verusd()?;
 
-                    let active_addresses = database::get_stakers_by_identity_address(
-                        &self.pool,
-                        &self.chain_id,
-                        &identity_addresses,
-                    )
-                    .await?
-                    .iter()
-                    .map(|staker| staker.identity_address.clone())
-                    .collect::<Vec<_>>();
+                    let active_addresses = if identity_addresses.is_empty() {
+                        database::get_stakers_by_status(
+                            &self.pool,
+                            &self.chain_id,
+                            StakerStatus::Active,
+                        )
+                        .await?
+                        .into_iter()
+                        .map(|staker| staker.identity_address)
+                        .collect::<Vec<_>>()
+                    } else {
+                        database::get_stakers_by_identity_address(
+                            &self.pool,
+                            &self.chain_id,
+                            &identity_addresses,
+                        )
+                        .await?
+                        .into_iter()
+                        .map(|staker| staker.identity_address)
+                        .collect::<Vec<_>>()
+                    };
 
                     let utxos = if !active_addresses.is_empty() {
                         verus_client.list_unspent(
@@ -812,8 +852,19 @@ pub enum CoinStakerMessage {
         Vec<Address>,
     ),
     GetStakingBalance(oneshot::Sender<HashMap<Address, Amount>>, Vec<Address>),
-    GetPayouts(oneshot::Sender<Vec<PayoutMember>>, Vec<Address>),
-    GetStakes(oneshot::Sender<Vec<Stake>>, Option<StakeStatus>),
+    GetPayouts(
+        oneshot::Sender<Vec<PayoutMember>>,
+        Vec<Address>,
+        Option<u32>,
+        Option<u64>,
+    ),
+    GetStakes(
+        oneshot::Sender<Vec<Stake>>,
+        Option<StakeStatus>,
+        Option<u32>,
+        Option<u64>,
+    ),
+    GetWork(oneshot::Sender<Vec<WorkShare>>),
     GetStatistics(oneshot::Sender<Stats>),
     PoolPrimaryAddress(oneshot::Sender<String>),
     SetStaking(bool),

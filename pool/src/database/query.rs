@@ -14,6 +14,7 @@ use super::constants::{DbPayoutMember, DbWorker};
 use crate::coinstaker::constants::{Stake, StakeStatus, Staker};
 use crate::coinstaker::StakerStatus;
 use crate::database::constants::{DbStake, DbStaker};
+use crate::http::constants::WorkShare;
 use crate::payout_service::{Payout, PayoutMember, Worker};
 
 #[allow(unused)]
@@ -45,7 +46,7 @@ pub async fn get_stakers_by_identity_address(
     identity_addresses: &Vec<Address>,
 ) -> Result<Vec<Staker>> {
     if identity_addresses.is_empty() {
-        return Ok(vec![]);
+        return get_all_stakers(pool, currency_address).await;
     }
 
     let mut query_builder: QueryBuilder<Postgres> = sqlx::QueryBuilder::new(
@@ -96,6 +97,28 @@ pub async fn get_stakers_by_status(
             AND status = $2"#,
         currency_address.to_string(),
         status as StakerStatus
+    )
+    .try_map(Staker::try_from)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+pub async fn get_all_stakers(pool: &PgPool, currency_address: &Address) -> Result<Vec<Staker>> {
+    let rows = sqlx::query_as!(
+        DbStaker,
+        r#"SELECT 
+            currency_address, 
+            identity_address, 
+            identity_name, 
+            min_payout, 
+            status AS "status: _",
+            fee
+        FROM stakers 
+        WHERE currency_address = $1
+        ORDER BY identity_name"#,
+        currency_address.to_string()
     )
     .try_map(Staker::try_from)
     .fetch_all(pool)
@@ -438,6 +461,44 @@ pub async fn get_stakes(
     Ok(rows)
 }
 
+/// Newest-first page for the public HTTP API (`block_height < before_height`).
+pub async fn get_stakes_page(
+    pool: &PgPool,
+    currency_address: &Address,
+    status: Option<StakeStatus>,
+    before_height: Option<u64>,
+    limit: u32,
+) -> Result<Vec<Stake>> {
+    let rows = sqlx::query_as!(
+        DbStake,
+        r#"SELECT
+            currency_address,
+            block_hash,
+            block_height,
+            amount,
+            found_by,
+            source_txid,
+            source_vout_num,
+            source_amount,
+            status AS "status: _"
+        FROM stakes
+        WHERE currency_address = $1
+            AND ($2::stake_status IS NULL OR status = $2)
+            AND ($3::bigint IS NULL OR block_height < $3)
+        ORDER BY block_height DESC
+        LIMIT $4"#,
+        currency_address.to_string(),
+        status as Option<StakeStatus>,
+        before_height.map(|h| h as i64),
+        limit as i64
+    )
+    .try_map(Stake::try_from)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
 pub async fn update_last_height(
     pool: &PgPool,
     currency_address: &Address,
@@ -494,6 +555,28 @@ pub async fn get_workers_by_round(
     .await?;
 
     Ok(workers)
+}
+
+pub async fn get_work(pool: &PgPool, currency_address: &Address) -> Result<Vec<WorkShare>> {
+    let rows = sqlx::query!(
+        r#"SELECT staker_address, shares
+        FROM work
+        WHERE currency_address = $1 AND round = 0
+        ORDER BY shares DESC"#,
+        currency_address.to_string()
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(WorkShare {
+                identity_address: Address::from_str(&row.staker_address)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?,
+                shares: row.shares,
+            })
+        })
+        .collect()
 }
 
 pub async fn get_payout_sync_id(pool: &PgPool, currency_address: &Address) -> Result<Option<u64>> {
@@ -598,6 +681,71 @@ pub async fn get_payout_members(
     )
     .try_map(PayoutMember::try_from)
     .fetch_all(conn)
+    .await?;
+
+    Ok(values)
+}
+
+pub async fn get_all_payout_members(
+    pool: &PgPool,
+    currency_address: &Address,
+) -> Result<Vec<PayoutMember>> {
+    let values = sqlx::query_as!(
+        DbPayoutMember,
+        "SELECT 
+            currency_address,
+            identity_address,
+            block_hash,
+            block_height,
+            shares,
+            reward,
+            fee,
+            txid
+        FROM payout_members 
+        WHERE currency_address = $1
+        ORDER BY block_height ASC",
+        currency_address.to_string(),
+    )
+    .try_map(PayoutMember::try_from)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(values)
+}
+
+/// Newest-first page. Empty `identity_addresses` means every member.
+pub async fn get_payout_members_page(
+    pool: &PgPool,
+    currency_address: &Address,
+    identity_addresses: &[Address],
+    before_height: Option<u64>,
+    limit: u32,
+) -> Result<Vec<PayoutMember>> {
+    let ids: Vec<String> = identity_addresses.iter().map(|a| a.to_string()).collect();
+    let values = sqlx::query_as!(
+        DbPayoutMember,
+        "SELECT 
+            currency_address,
+            identity_address,
+            block_hash,
+            block_height,
+            shares,
+            reward,
+            fee,
+            txid
+        FROM payout_members 
+        WHERE currency_address = $1
+            AND (CARDINALITY($2::text[]) = 0 OR identity_address = ANY($2))
+            AND ($3::bigint IS NULL OR block_height < $3)
+        ORDER BY block_height DESC
+        LIMIT $4",
+        currency_address.to_string(),
+        &ids,
+        before_height.map(|h| h as i64),
+        limit as i64
+    )
+    .try_map(PayoutMember::try_from)
+    .fetch_all(pool)
     .await?;
 
     Ok(values)
@@ -999,6 +1147,98 @@ mod tests {
         let unpaid_paid = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
         tx.commit().await.unwrap();
         assert!(unpaid_paid.is_empty());
+    }
+
+    async fn insert_staker(pool: &PgPool, currency: &Address, identity: &Address, name: &str, status: &str) {
+        sqlx::query(
+            "INSERT INTO stakers (
+                currency_address, identity_address, identity_name, status, min_payout, fee
+            ) VALUES ($1, $2, $3, $4::staker_status, 0, 0)",
+        )
+        .bind(currency.to_string())
+        .bind(identity.to_string())
+        .bind(name)
+        .bind(status)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn empty_identity_list_returns_all_stakers(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let bob = Address::from_str("iGLN3bFv6uY2HAgQgVwiGriTRgQmTyJrwi").unwrap();
+        insert_staker(&pool, &currency, &alice, "alice", "ACTIVE").await;
+        insert_staker(&pool, &currency, &bob, "bob", "INACTIVE").await;
+
+        let all = get_stakers_by_identity_address(&pool, &currency, &vec![])
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 2);
+
+        let named = get_all_stakers(&pool, &currency).await.unwrap();
+        assert_eq!(named[0].identity_name, "alice");
+        assert_eq!(named[1].identity_name, "bob");
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn stakes_page_respects_limit_and_before_height(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let found_by = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let txid = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        for (i, height) in [10i64, 20, 30].iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO stakes (
+                    currency_address, block_hash, block_height, amount, found_by,
+                    source_txid, source_vout_num, source_amount, status
+                ) VALUES ($1, $2, $3, 1, $4, $5, 0, 1, 'MATURED')",
+            )
+            .bind(currency.to_string())
+            .bind(format!("000000000000000000000000000000000000000000000000000000000000000{i}"))
+            .bind(height)
+            .bind(found_by.to_string())
+            .bind(txid)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let unbounded = get_stakes(&pool, &currency, None).await.unwrap();
+        assert_eq!(
+            unbounded.iter().map(|s| s.block_height).collect::<Vec<_>>(),
+            vec![10, 20, 30]
+        );
+
+        let page = get_stakes_page(&pool, &currency, None, None, 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            page.iter().map(|s| s.block_height).collect::<Vec<_>>(),
+            vec![30, 20]
+        );
+
+        let next = get_stakes_page(&pool, &currency, None, Some(20), 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            next.iter().map(|s| s.block_height).collect::<Vec<_>>(),
+            vec![10]
+        );
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn work_round_zero_is_current_unpaid_shares(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let mut payload = HashMap::new();
+        payload.insert(alice.clone(), Decimal::from_f64_retain(1.5).unwrap());
+        store_work(&pool, &currency, payload, 1).await.unwrap();
+
+        let work = get_work(&pool, &currency).await.unwrap();
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].identity_address, alice);
+        assert_eq!(work[0].shares, Decimal::from_f64_retain(1.5).unwrap());
     }
 
     #[sqlx::test(migrations = "sql/migrations")]

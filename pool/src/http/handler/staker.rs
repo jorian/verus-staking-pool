@@ -10,9 +10,11 @@ use crate::{
     coinstaker::{
         coinstaker::CoinStakerMessage,
         constants::{Staker, StakerEarnings},
-        StakerStatus,
     },
-    http::handler::AppJson,
+    http::handler::{
+        params::{GetStakerArgs, IdentityQuery},
+        AppJson,
+    },
 };
 
 use super::AppError;
@@ -67,27 +69,20 @@ pub async fn staker_status(
     }
 }
 
-#[derive(Deserialize, Debug)]
-pub struct GetStakerArgs {
-    pub identity_addresses: Vec<Address>,
-    pub staker_status: Option<StakerStatus>,
-}
-
-/// Finds and returns an array of stakers based on the supplied `identity_addresses` argument,
-/// if they are found, optionally filtered by staker status.
+/// Finds and returns an array of stakers.
 ///
-/// `staker_status` can be one of ["active", "cooling_down", "inactive"].
-///
-/// Ignores VerusIDs that are not found.
+/// Omit `identity_address` to list every staker on this chain. Optionally filter with
+/// `staker_status` (`active`, `cooling_down`, `inactive`). Repeated `identity_address`
+/// (or `identity_addresses`) limits the result to those VerusIDs; unknown ids are ignored.
 pub async fn get_stakers(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
-    Query(args): Query<GetStakerArgs>,
+    axum_extra::extract::Query(args): axum_extra::extract::Query<GetStakerArgs>,
 ) -> Result<AppJson<Vec<Staker>>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<Vec<Staker>>();
 
     tx.send(CoinStakerMessage::GetStakers(
         os_tx,
-        args.identity_addresses,
+        args.identities.addresses(),
         args.staker_status,
     ))
     .await
@@ -118,20 +113,21 @@ pub async fn get_staker_earnings(
     Ok(AppJson(map))
 }
 
-/// Returns an array of staking balances, based on the provided VerusIDs.
+/// Returns eligible staking balances.
 ///
-/// The balances represent the currently eligible staking balance.
+/// Omit `identity_address` to return balances for every **active** staker.
 pub async fn get_staking_balance(
     Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
-    Query(args): Query<Vec<(String, Address)>>,
+    axum_extra::extract::Query(args): axum_extra::extract::Query<IdentityQuery>,
 ) -> Result<AppJson<HashMap<Address, f64>>, AppError> {
     let (os_tx, os_rx) = oneshot::channel::<HashMap<Address, Amount>>();
 
-    let args = args.into_iter().map(|arg| arg.1).collect::<Vec<_>>();
-
-    tx.send(CoinStakerMessage::GetStakingBalance(os_tx, args))
-        .await
-        .context("Could not send Coinstaker message")?;
+    tx.send(CoinStakerMessage::GetStakingBalance(
+        os_tx,
+        args.addresses(),
+    ))
+    .await
+    .context("Could not send Coinstaker message")?;
 
     let balances = os_rx
         .await
