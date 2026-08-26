@@ -996,6 +996,76 @@ pub async fn get_total_rewards(conn: &PgPool, currency_address: &Address) -> Res
     Ok(res.unwrap_or(Amount::ZERO))
 }
 
+const HISTORY_MAX_POINTS: usize = 240;
+
+fn take_evenly<T: Clone>(items: &[T], max: usize) -> Vec<T> {
+    if items.len() <= max || max < 2 {
+        return items.to_vec();
+    }
+    let last = items.len() - 1;
+    (0..max)
+        .map(|i| items[i * last / (max - 1)].clone())
+        .collect()
+}
+
+/// Sum of eligible staking sats per work round (`round` is the block height).
+pub async fn get_work_history(
+    pool: &PgPool,
+    currency_address: &Address,
+) -> Result<Vec<crate::http::constants::StakingBalancePoint>> {
+    let rows = sqlx::query!(
+        r#"SELECT round AS height, COALESCE(SUM(shares), 0) AS "shares!"
+        FROM work
+        WHERE currency_address = $1 AND round > 0
+        GROUP BY round
+        ORDER BY round"#,
+        currency_address.to_string()
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let points: Vec<_> = rows
+        .into_iter()
+        .map(|row| crate::http::constants::StakingBalancePoint {
+            height: row.height,
+            sats: row.shares.round_dp(0).to_string(),
+        })
+        .collect();
+
+    Ok(take_evenly(&points, HISTORY_MAX_POINTS))
+}
+
+/// Cumulative count of pool stakes by block height.
+pub async fn get_stake_count_history(
+    pool: &PgPool,
+    currency_address: &Address,
+) -> Result<Vec<crate::http::constants::StakeCountPoint>> {
+    let rows = sqlx::query!(
+        r#"SELECT block_height, COUNT(*) AS "n!"
+        FROM stakes
+        WHERE currency_address = $1
+        GROUP BY block_height
+        ORDER BY block_height"#,
+        currency_address.to_string()
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut acc = 0i64;
+    let points: Vec<_> = rows
+        .into_iter()
+        .map(|row| {
+            acc += row.n;
+            crate::http::constants::StakeCountPoint {
+                height: row.block_height,
+                count: acc,
+            }
+        })
+        .collect();
+
+    Ok(take_evenly(&points, HISTORY_MAX_POINTS))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

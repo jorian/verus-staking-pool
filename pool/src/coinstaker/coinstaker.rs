@@ -208,6 +208,19 @@ impl CoinStaker {
                         Err(anyhow!("the sender dropped"))?
                     }
                 }
+                CoinStakerMessage::GetHistory(os_tx) => {
+                    let (staking_balance, stakes) = tokio::try_join!(
+                        database::get_work_history(&self.pool, &self.chain_id),
+                        database::get_stake_count_history(&self.pool, &self.chain_id)
+                    )?;
+                    let history = crate::http::constants::PoolHistory {
+                        staking_balance,
+                        stakes,
+                    };
+                    if os_tx.send(history).is_err() {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
                 CoinStakerMessage::GetStakerEarnings(os_tx, identity_addresses) => {
                     let mut conn = self.pool.acquire().await?;
                     let payout_members = database::get_payout_members(
@@ -866,6 +879,7 @@ pub enum CoinStakerMessage {
     ),
     GetWork(oneshot::Sender<Vec<WorkShare>>),
     GetStatistics(oneshot::Sender<Stats>),
+    GetHistory(oneshot::Sender<crate::http::constants::PoolHistory>),
     PoolPrimaryAddress(oneshot::Sender<String>),
     SetStaking(bool),
     CheckBlockManually(oneshot::Sender<()>, u64),

@@ -26,3 +26,23 @@ pub struct WorkShare {
     pub identity_address: Address,
     pub shares: Decimal,
 }
+
+/// Pool staking supply at a block, reconstructed from `work.shares` (sats).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct StakingBalancePoint {
+    pub height: i64,
+    pub sats: String,
+}
+
+/// Cumulative number of pool stakes at a block height.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct StakeCountPoint {
+    pub height: i64,
+    pub count: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PoolHistory {
+    pub staking_balance: Vec<StakingBalancePoint>,
+    pub stakes: Vec<StakeCountPoint>,
+}
