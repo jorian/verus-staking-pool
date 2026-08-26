@@ -135,6 +135,18 @@ impl CoinStaker {
                         .send(opt_staker)
                         .expect("a oneshot message failed to send");
                 }
+                CoinStakerMessage::SetStakerFee(os_tx, identity_address, fee) => {
+                    let staker = database::update_staker_fee(
+                        &self.pool,
+                        &self.chain_id,
+                        &identity_address,
+                        fee,
+                    )
+                    .await?;
+                    if os_tx.send(staker).is_err() {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
                 CoinStakerMessage::GetStakers(os_tx, identity_addresses, staker_status) => {
                     let mut stakers = if let Some(status) = staker_status {
                         database::get_stakers_by_status(&self.pool, &self.chain_id, status).await?
@@ -855,6 +867,7 @@ pub enum CoinStakerMessage {
     Block(BlockHash),
     StakingSupply(oneshot::Sender<StakingSupply>, Vec<Address>),
     StakerStatus(oneshot::Sender<Option<Staker>>, Address),
+    SetStakerFee(oneshot::Sender<Option<Staker>>, Address, Decimal),
     GetStakers(
         oneshot::Sender<Vec<Staker>>,
         Vec<Address>,

@@ -154,6 +154,26 @@ pub async fn get_staker(
     Ok(staker)
 }
 
+pub async fn update_staker_fee(
+    pool: &PgPool,
+    currency_address: &Address,
+    identity_address: &Address,
+    fee: Decimal,
+) -> Result<Option<Staker>> {
+    let staker = sqlx::query_file_as!(
+        DbStaker,
+        "sql/update_staker_fee.sql",
+        currency_address.to_string(),
+        identity_address.to_string(),
+        fee
+    )
+    .try_map(Staker::try_from)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(staker)
+}
+
 /// Stores work for every staking participant in this staking round.
 ///
 /// Every active staker gets their share (their stake) added as work.

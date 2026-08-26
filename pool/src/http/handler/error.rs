@@ -22,6 +22,7 @@ where
 pub enum AppError {
     JsonRejection(JsonRejection),
     GenericError(anyhow::Error),
+    BadRequest(String),
     NotFound,
 }
 
@@ -49,6 +50,7 @@ impl IntoResponse for AppError {
                     "Something went wrong".to_owned(),
                 )
             }
+            AppError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             AppError::NotFound => (StatusCode::NOT_FOUND, "Resource not found".to_owned()),
         };
 
