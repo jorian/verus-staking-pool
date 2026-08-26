@@ -1085,6 +1085,11 @@ pub async fn get_work_history(
         r#"SELECT height, shares
         FROM work_snapshots
         WHERE currency_address = $1
+            AND height > (
+                SELECT COALESCE(MAX(height), 0) - 1440
+                FROM work_snapshots
+                WHERE currency_address = $1
+            )
         ORDER BY height"#,
         currency_address.to_string()
     )
@@ -1101,7 +1106,7 @@ pub async fn get_work_history(
         })
         .collect();
 
-    Ok(take_evenly(&points, HISTORY_MAX_POINTS))
+    Ok(points)
 }
 
 /// Cumulative count of pool stakes by block height.
