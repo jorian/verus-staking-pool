@@ -828,7 +828,7 @@ pub async fn get_unpaid_payout_members(
             AND pm.payment_batch_id IS NULL
         JOIN stakers s ON pm.currency_address = s.currency_address
             AND pm.identity_address = s.identity_address
-        WHERE pm_sum.total_rewards > s.min_payout 
+        WHERE pm_sum.total_rewards >= s.min_payout 
             OR s.status = 'INACTIVE'
         FOR UPDATE",
         currency_address.to_string(),
@@ -1407,5 +1407,45 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn exact_min_payout_is_paid(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let identity = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let block_hash = "00000000000797cb62652d5901ab30e907f9a5657947eba15f1c9e7e19abe2e0";
+        let min_payout: i64 = 100_000_000;
+
+        sqlx::query(
+            "INSERT INTO stakers (
+                currency_address, identity_address, identity_name, status, min_payout, fee
+            ) VALUES ($1, $2, 'alice', 'ACTIVE', $3, 0)",
+        )
+        .bind(currency.to_string())
+        .bind(identity.to_string())
+        .bind(min_payout)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO payout_members (
+                currency_address, identity_address, block_hash, block_height,
+                shares, reward, fee, txid
+            ) VALUES ($1, $2, $3, 1, 1, $4, 0, NULL)",
+        )
+        .bind(currency.to_string())
+        .bind(identity.to_string())
+        .bind(block_hash)
+        .bind(min_payout)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let unpaid = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(unpaid.len(), 1);
+        assert_eq!(unpaid[0].reward.as_sat(), min_payout as u64);
     }
 }
