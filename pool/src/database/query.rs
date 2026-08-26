@@ -182,11 +182,13 @@ pub async fn store_work(
     pool: &PgPool,
     currency_address: &Address,
     payload: HashMap<Address, Decimal>,
-    _last_blockheight: u64,
+    blockheight: u64,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
+    let mut total = Decimal::ZERO;
 
     for (staker_address, shares) in payload {
+        total += shares;
         sqlx::query_file!(
             "sql/store_work.sql",
             currency_address.to_string(),
@@ -196,11 +198,16 @@ pub async fn store_work(
         )
         .execute(&mut *tx)
         .await?;
-
-        // TODO? there was a latest_round here that functions as a sort of
-        // synchronization, where we keep track of the latest state of a subscriber.
-        // it was only used in tests and to get the last round on startup
     }
+
+    sqlx::query_file!(
+        "sql/store_work_snapshot.sql",
+        currency_address.to_string(),
+        blockheight as i64,
+        total
+    )
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
 
@@ -1068,46 +1075,30 @@ fn take_evenly<T: Clone>(items: &[T], max: usize) -> Vec<T> {
         .collect()
 }
 
-/// Sum of eligible staking sats per work round.
-///
-/// Completed rounds use `round` as the stake height. Round 0 is the current
-/// unpaid round and is plotted at `synchronization.last_height`.
+/// Eligible pool staking supply at each block height (one snapshot per block).
 pub async fn get_work_history(
     pool: &PgPool,
     currency_address: &Address,
 ) -> Result<Vec<crate::http::constants::StakingBalancePoint>> {
     let rows = sqlx::query!(
-        r#"SELECT
-            w.round,
-            COALESCE(SUM(w.shares), 0) AS "shares!",
-            s.last_height AS "last_height?"
-        FROM work w
-        LEFT JOIN synchronization s ON s.currency_address = w.currency_address
-        WHERE w.currency_address = $1
-        GROUP BY w.round, s.last_height
-        ORDER BY w.round"#,
+        r#"SELECT height, shares
+        FROM work_snapshots
+        WHERE currency_address = $1
+        ORDER BY height"#,
         currency_address.to_string()
     )
     .fetch_all(pool)
     .await?;
 
-    let mut points: Vec<_> = rows
+    let last = rows.last().map(|row| row.height);
+    let points: Vec<_> = rows
         .into_iter()
-        .map(|row| {
-            let current = row.round == 0;
-            let height = if current {
-                row.last_height.unwrap_or(0)
-            } else {
-                row.round
-            };
-            crate::http::constants::StakingBalancePoint {
-                height,
-                sats: row.shares.round_dp(0).to_string(),
-                current,
-            }
+        .map(|row| crate::http::constants::StakingBalancePoint {
+            height: row.height,
+            sats: row.shares.round_dp(0).to_string(),
+            current: last == Some(row.height),
         })
         .collect();
-    points.sort_by_key(|p| p.height);
 
     Ok(take_evenly(&points, HISTORY_MAX_POINTS))
 }
@@ -1397,28 +1388,24 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "sql/migrations")]
-    async fn work_history_includes_current_round_at_last_height(pool: PgPool) {
+    async fn work_history_is_staking_balance_by_height(pool: PgPool) {
         let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
         let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
-        let mut payload = HashMap::new();
-        payload.insert(alice, Decimal::from_f64_retain(100.0).unwrap());
-        store_work(&pool, &currency, payload, 1).await.unwrap();
-
-        sqlx::query!(
-            "INSERT INTO synchronization (currency_address, last_height, last_payout_height)
-            VALUES ($1, $2, 0)",
-            currency.to_string(),
-            4210000i64
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        let mut first = HashMap::new();
+        first.insert(alice.clone(), Decimal::from_f64_retain(100.0).unwrap());
+        store_work(&pool, &currency, first, 10).await.unwrap();
+        let mut second = HashMap::new();
+        second.insert(alice, Decimal::from_f64_retain(120.0).unwrap());
+        store_work(&pool, &currency, second, 11).await.unwrap();
 
         let history = get_work_history(&pool, &currency).await.unwrap();
-        assert_eq!(history.len(), 1);
-        assert_eq!(history[0].height, 4210000);
-        assert!(history[0].current);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].height, 10);
         assert_eq!(history[0].sats, "100");
+        assert!(!history[0].current);
+        assert_eq!(history[1].height, 11);
+        assert_eq!(history[1].sats, "120");
+        assert!(history[1].current);
     }
 
     #[sqlx::test(migrations = "sql/migrations")]
