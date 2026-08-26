@@ -394,6 +394,46 @@ pub async fn get_stakes_by_status(
     Ok(rows)
 }
 
+/// Matured stakes that do not yet have a `payouts` row.
+///
+/// Used instead of a `last_payout_height` cursor so a later-height stake
+/// cannot permanently skip an earlier one.
+pub async fn get_matured_stakes_without_payout(
+    pool: &PgPool,
+    currency_address: &Address,
+) -> Result<Vec<Stake>> {
+    let rows = sqlx::query_as!(
+        DbStake,
+        r#"SELECT
+            s.currency_address,
+            s.block_hash,
+            s.block_height,
+            s.amount,
+            s.found_by,
+            s.source_txid,
+            s.source_vout_num,
+            s.source_amount,
+            s.status AS "status: _"
+        FROM stakes s
+        WHERE s.currency_address = $1
+            AND s.status = $2
+            AND NOT EXISTS (
+                SELECT 1
+                FROM payouts p
+                WHERE p.currency_address = s.currency_address
+                    AND p.block_hash = s.block_hash
+            )
+        ORDER BY s.block_height ASC"#,
+        currency_address.to_string(),
+        StakeStatus::Matured as StakeStatus
+    )
+    .try_map(Stake::try_from)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
 /// Returns stakes that are above <block_height> and are either maturing or have matured.
 ///
 /// This is useful to compensate for work that is lost due to maturing UTXOs because they were
@@ -1219,7 +1259,13 @@ mod tests {
         assert!(unpaid_paid.is_empty());
     }
 
-    async fn insert_staker(pool: &PgPool, currency: &Address, identity: &Address, name: &str, status: &str) {
+    async fn insert_staker(
+        pool: &PgPool,
+        currency: &Address,
+        identity: &Address,
+        name: &str,
+        status: &str,
+    ) {
         sqlx::query(
             "INSERT INTO stakers (
                 currency_address, identity_address, identity_name, status, min_payout, fee
@@ -1265,7 +1311,9 @@ mod tests {
                 ) VALUES ($1, $2, $3, 1, $4, $5, 0, 1, 'MATURED')",
             )
             .bind(currency.to_string())
-            .bind(format!("000000000000000000000000000000000000000000000000000000000000000{i}"))
+            .bind(format!(
+                "000000000000000000000000000000000000000000000000000000000000000{i}"
+            ))
             .bind(height)
             .bind(found_by.to_string())
             .bind(txid)

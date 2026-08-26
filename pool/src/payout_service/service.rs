@@ -116,18 +116,8 @@ impl Service {
     }
 
     async fn new_payout(&self) -> Result<()> {
-        // TODO can be null at first start
-        let last_sync_id = database::get_payout_sync_id(&self.database, &self.chain_id)
-            .await?
-            .unwrap_or(0);
-
-        let stakes = database::get_stakes_by_status(
-            &self.database,
-            &self.chain_id,
-            crate::coinstaker::constants::StakeStatus::Matured,
-            Some(last_sync_id),
-        )
-        .await?;
+        let stakes =
+            database::get_matured_stakes_without_payout(&self.database, &self.chain_id).await?;
 
         for stake in stakes {
             let workers =
