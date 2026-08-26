@@ -69,6 +69,15 @@ pub enum WebhookMessage {
         identity_address: Address,
         identity_name: String,
     },
+    /// A matured stake had no work rows; payout was not created so the cursor is not advanced.
+    PayoutSkippedNoWork {
+        currency_address: Address,
+        currency_name: String,
+        hash: BlockHash,
+        height: u64,
+        #[serde(with = "as_sat")]
+        amount: Amount,
+    },
     /// Admin alert: a payout batch is stuck and must be investigated by hand.
     PayoutSendStuck {
         currency_address: Address,
@@ -112,6 +121,7 @@ impl Display for WebhookMessage {
             WebhookMessage::StakeStale { .. } => write!(f, "stake_stale"),
             WebhookMessage::NewStaker { .. } => write!(f, "new_staker"),
             WebhookMessage::LeavingStaker { .. } => write!(f, "leaving_staker"),
+            WebhookMessage::PayoutSkippedNoWork { .. } => write!(f, "payout_skipped_no_work"),
             WebhookMessage::PayoutSendStuck { .. } => write!(f, "payout_send_stuck"),
         }
     }

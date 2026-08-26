@@ -63,10 +63,40 @@ impl Service {
         })
     }
 
+    fn workers_have_shares(workers: &[crate::payout_service::Worker]) -> bool {
+        workers.iter().any(|w| w.shares > Decimal::ZERO)
+    }
+
+    async fn skip_payout_without_work(&self, stake: &Stake) {
+        warn!(
+            height = stake.block_height,
+            hash = %stake.block_hash,
+            amount = %stake.amount,
+            "matured stake has no work; not creating a payout"
+        );
+        self.webhooks
+            .send(WebhookMessage::PayoutSkippedNoWork {
+                currency_address: stake.currency_address.clone(),
+                currency_name: self.currency_name.clone(),
+                hash: stake.block_hash,
+                height: stake.block_height,
+                amount: stake.amount,
+            })
+            .await;
+    }
+
     async fn new_manual_payout(&self, stake: &Stake) -> Result<()> {
         let workers =
             database::get_workers_by_round(&self.database, &self.chain_id, stake.block_height)
                 .await?;
+
+        if !Self::workers_have_shares(&workers) {
+            self.skip_payout_without_work(stake).await;
+            anyhow::bail!(
+                "stake at height {} has no work; refusing to create an empty payout",
+                stake.block_height
+            );
+        }
 
         let mut tx = self.database.begin().await?;
 
@@ -103,6 +133,11 @@ impl Service {
             let workers =
                 database::get_workers_by_round(&self.database, &self.chain_id, stake.block_height)
                     .await?;
+
+            if !Self::workers_have_shares(&workers) {
+                self.skip_payout_without_work(&stake).await;
+                continue;
+            }
 
             let mut tx = self.database.begin().await?;
 
