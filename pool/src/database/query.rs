@@ -183,9 +183,10 @@ pub async fn store_work(
     currency_address: &Address,
     payload: HashMap<Address, Decimal>,
     blockheight: u64,
+    extra_snapshot: Decimal,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
-    let mut total = Decimal::ZERO;
+    let mut total = extra_snapshot;
 
     for (staker_address, shares) in payload {
         total += shares;
@@ -1149,7 +1150,7 @@ mod tests {
             Decimal::from_f64_retain(1.23).unwrap(),
         );
 
-        store_work(&pool, &currency_address, payload, 1)
+        store_work(&pool, &currency_address, payload, 1, Decimal::ZERO)
             .await
             .unwrap();
 
@@ -1174,7 +1175,7 @@ mod tests {
             Decimal::from_f32_retain(1.23).unwrap(),
         );
 
-        store_work(&pool, &currency_address, payload, 1)
+        store_work(&pool, &currency_address, payload, 1, Decimal::ZERO)
             .await
             .unwrap();
 
@@ -1194,7 +1195,7 @@ mod tests {
             Decimal::from_f32_retain(3.77).unwrap(),
         );
 
-        store_work(&pool, &currency_address, payload, 1)
+        store_work(&pool, &currency_address, payload, 1, Decimal::ZERO)
             .await
             .unwrap();
 
@@ -1379,7 +1380,9 @@ mod tests {
         let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
         let mut payload = HashMap::new();
         payload.insert(alice.clone(), Decimal::from_f64_retain(1.5).unwrap());
-        store_work(&pool, &currency, payload, 1).await.unwrap();
+        store_work(&pool, &currency, payload, 1, Decimal::ZERO)
+            .await
+            .unwrap();
 
         let work = get_work(&pool, &currency).await.unwrap();
         assert_eq!(work.len(), 1);
@@ -1393,10 +1396,14 @@ mod tests {
         let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
         let mut first = HashMap::new();
         first.insert(alice.clone(), Decimal::from_f64_retain(100.0).unwrap());
-        store_work(&pool, &currency, first, 10).await.unwrap();
+        store_work(&pool, &currency, first, 10, Decimal::ZERO)
+            .await
+            .unwrap();
         let mut second = HashMap::new();
         second.insert(alice, Decimal::from_f64_retain(120.0).unwrap());
-        store_work(&pool, &currency, second, 11).await.unwrap();
+        store_work(&pool, &currency, second, 11, Decimal::from(15))
+            .await
+            .unwrap();
 
         let history = get_work_history(&pool, &currency).await.unwrap();
         assert_eq!(history.len(), 2);
@@ -1404,8 +1411,10 @@ mod tests {
         assert_eq!(history[0].sats, "100");
         assert!(!history[0].current);
         assert_eq!(history[1].height, 11);
-        assert_eq!(history[1].sats, "120");
+        assert_eq!(history[1].sats, "135");
         assert!(history[1].current);
+        let work = get_work(&pool, &currency).await.unwrap();
+        assert_eq!(work[0].shares, Decimal::from_f64_retain(220.0).unwrap());
     }
 
     #[sqlx::test(migrations = "sql/migrations")]

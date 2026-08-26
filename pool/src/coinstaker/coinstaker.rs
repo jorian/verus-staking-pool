@@ -445,7 +445,17 @@ impl CoinStaker {
             .map(|subscriber| subscriber.identity_address.clone())
             .collect::<Vec<Address>>();
 
+        let pool_extra = Self::eligible_sats(&verus_client, vec![self.config.pool_address.clone()])?;
+
         if active_staker_addresses.is_empty() {
+            database::store_work(
+                &self.pool,
+                &self.chain_id,
+                HashMap::new(),
+                blockheight,
+                pool_extra,
+            )
+            .await?;
             return Ok(());
         }
 
@@ -487,11 +497,33 @@ impl CoinStaker {
             }
         });
 
-        debug!(?payload, "storing work");
+        debug!(?payload, %pool_extra, "storing work");
 
-        database::store_work(&self.pool, &self.chain_id, payload, blockheight).await?;
+        database::store_work(
+            &self.pool,
+            &self.chain_id,
+            payload,
+            blockheight,
+            pool_extra,
+        )
+        .await?;
 
         Ok(())
+    }
+
+    fn eligible_sats(client: &VerusClient, addresses: Vec<Address>) -> Result<Decimal> {
+        if addresses.is_empty() {
+            return Ok(Decimal::ZERO);
+        }
+        let utxos = client.list_unspent(Some(150), None, Some(&addresses))?;
+        let mut total = Decimal::ZERO;
+        for utxo in utxos {
+            if !utxo.amount.is_positive() {
+                continue;
+            }
+            total += Decimal::from_u64(utxo.amount.to_unsigned().unwrap().as_sat()).unwrap();
+        }
+        Ok(total)
     }
 
     #[instrument(skip(self))]
