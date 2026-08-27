@@ -1086,7 +1086,7 @@ pub async fn get_work_history(
         FROM work_snapshots
         WHERE currency_address = $1
             AND height > (
-                SELECT COALESCE(MAX(height), 0) - 1440
+                SELECT COALESCE(MAX(height), 0) - 40320
                 FROM work_snapshots
                 WHERE currency_address = $1
             )
