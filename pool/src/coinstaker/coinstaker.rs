@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
 use axum::async_trait;
@@ -12,18 +13,17 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use vrsc_rpc::bitcoin::BlockHash;
 use vrsc_rpc::client::{Client as VerusClient, RpcApi};
 use vrsc_rpc::json::identity::IdentityPrimary;
-use vrsc_rpc::json::vrsc::{Address, Amount};
+use vrsc_rpc::json::vrsc::Address;
 use vrsc_rpc::json::{Block, ValidationType};
 
 use crate::coinstaker::constants::{Stake, StakeStatus};
 use crate::coinstaker::http::WebhookMessage;
-use crate::http::constants::{StakingSupply, Stats, WorkShare};
-use crate::payout_service::PayoutMember;
+use super::handle::{fold_unspent, CoinStakerHandle, SupplyCache, UnspentCache};
 use crate::util::verus::*;
-use crate::{database, payout_service};
+use crate::database;
 
 use super::config::Config as CoinstakerConfig;
-use super::constants::{Staker, StakerEarnings};
+use super::constants::Staker;
 use super::http::Webhook;
 use super::StakerStatus;
 
@@ -35,6 +35,8 @@ pub struct CoinStaker {
     rx: mpsc::Receiver<CoinStakerMessage>,
     pub chain_id: Address,
     webhooks: Webhook,
+    supply_cache: Arc<RwLock<Option<SupplyCache>>>,
+    unspent_cache: Arc<RwLock<Option<UnspentCache>>>,
 }
 
 impl CoinStaker {
@@ -54,7 +56,21 @@ impl CoinStaker {
             rx,
             chain_id,
             webhooks,
+            supply_cache: Arc::new(RwLock::new(None)),
+            unspent_cache: Arc::new(RwLock::new(None)),
         })
+    }
+
+    pub fn handle(&self) -> CoinStakerHandle {
+        CoinStakerHandle {
+            tx: self.tx.clone(),
+            pool: self.pool.clone(),
+            chain_id: self.chain_id.clone(),
+            pool_primary_address: self.config.pool_primary_address.clone(),
+            chain_config: self.config.chain_config.clone(),
+            supply_cache: self.supply_cache.clone(),
+            unspent_cache: self.unspent_cache.clone(),
+        }
     }
 
     pub fn verusd(&self) -> Result<VerusClient> {
@@ -66,6 +82,9 @@ impl CoinStaker {
     #[instrument(skip(self), fields(coin = self.config.currency_name))]
     async fn listen(&mut self) -> Result<()> {
         trace!("listening for messages");
+        if let Err(err) = self.refresh_http_caches().await {
+            warn!(?err, "http cache warmup failed");
+        }
 
         while let Some(msg) = self.rx.recv().await {
             trace!(?msg, "received new ZMQ message");
@@ -109,20 +128,24 @@ impl CoinStaker {
                     .await?;
                     self.check_maturing_stakes(&verus_client).await?;
 
-                    if self.daemon_is_staking(&verus_client).await? == false {
-                        continue; // don't add work for not staking daemon
-                    };
+                    if self.daemon_is_staking(&verus_client).await? {
+                        // Detect the stake first so add_work can credit the spent UTXO at
+                        // the find height, but do not store it yet: store_new_stake moves
+                        // round 0, which must include this block's work.
+                        let this_stake = self.is_stake(&block_hash).await?;
+                        self.add_work(&active_stakers, block.height, this_stake.as_ref())
+                            .await?;
+                        database::update_last_height(&self.pool, &self.chain_id, block.height)
+                            .await?;
+                        if let Some(stake) = this_stake {
+                            self.commit_stake(stake).await?;
+                        }
+                    }
 
-                    self.add_work(&active_stakers, block.height).await?;
-                    database::update_last_height(&self.pool, &self.chain_id, block.height).await?;
-
-                    self.check_for_stake(&block_hash).await?;
-                }
-                CoinStakerMessage::StakingSupply(os_tx, identity_addresses) => {
-                    let res = self.get_staking_supply(identity_addresses).await?;
-
-                    if os_tx.send(res).is_err() {
-                        Err(anyhow!("the sender dropped"))?
+                    // Eligible staking only changes per block. Warm before the next HTTP
+                    // request so a reload does not wait on getwalletinfo/listunspent.
+                    if let Err(err) = self.refresh_http_caches().await {
+                        warn!(?err, "http cache refresh failed");
                     }
                 }
                 CoinStakerMessage::StakerStatus(os_tx, identity_address) => {
@@ -135,215 +158,10 @@ impl CoinStaker {
                         .send(opt_staker)
                         .expect("a oneshot message failed to send");
                 }
-                CoinStakerMessage::SetStakerFee(os_tx, identity_address, fee) => {
-                    let staker = database::update_staker_fee(
-                        &self.pool,
-                        &self.chain_id,
-                        &identity_address,
-                        fee,
-                    )
-                    .await?;
-                    if os_tx.send(staker).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
-                CoinStakerMessage::GetStakers(os_tx, identity_addresses, staker_status) => {
-                    let mut stakers = if let Some(status) = staker_status {
-                        database::get_stakers_by_status(&self.pool, &self.chain_id, status).await?
-                    } else if identity_addresses.is_empty() {
-                        database::get_all_stakers(&self.pool, &self.chain_id).await?
-                    } else {
-                        database::get_stakers_by_identity_address(
-                            &self.pool,
-                            &self.chain_id,
-                            &identity_addresses,
-                        )
-                        .await?
-                    };
-                    if !identity_addresses.is_empty() {
-                        stakers.retain(|s| identity_addresses.contains(&s.identity_address));
-                    }
-                    if os_tx.send(stakers).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
-                CoinStakerMessage::GetPayouts(os_tx, identity_addresses, limit, before_height) => {
-                    let payout_members = if limit.is_some() || before_height.is_some() {
-                        database::get_payout_members_page(
-                            &self.pool,
-                            &self.chain_id,
-                            &identity_addresses,
-                            before_height,
-                            limit.unwrap_or(200),
-                        )
-                        .await?
-                    } else if identity_addresses.is_empty() {
-                        database::get_all_payout_members(&self.pool, &self.chain_id).await?
-                    } else {
-                        let mut conn = self.pool.acquire().await?;
-                        database::get_payout_members(
-                            &mut conn,
-                            &self.chain_id,
-                            &identity_addresses,
-                        )
-                        .await?
-                    };
-
-                    if os_tx.send(payout_members).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
-                CoinStakerMessage::GetStakes(os_tx, stake_status, limit, before_height) => {
-                    let stakes = if limit.is_some() || before_height.is_some() {
-                        database::get_stakes_page(
-                            &self.pool,
-                            &self.chain_id,
-                            stake_status,
-                            before_height,
-                            limit.unwrap_or(200),
-                        )
-                        .await?
-                    } else if let Some(status) = stake_status {
-                        database::get_stakes_by_status(&self.pool, &self.chain_id, status, None)
-                            .await?
-                    } else {
-                        database::get_stakes(&self.pool, &self.chain_id, None).await?
-                    };
-
-                    if os_tx.send(stakes).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
-                CoinStakerMessage::GetWork(os_tx) => {
-                    let work = database::get_work(&self.pool, &self.chain_id).await?;
-                    if os_tx.send(work).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
-                CoinStakerMessage::GetHistory(os_tx) => {
-                    let (staking_balance, stakes) = tokio::try_join!(
-                        database::get_work_history(&self.pool, &self.chain_id),
-                        database::get_stake_count_history(&self.pool, &self.chain_id)
-                    )?;
-                    let history = crate::http::constants::PoolHistory {
-                        staking_balance,
-                        stakes,
-                    };
-                    if os_tx.send(history).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
-                CoinStakerMessage::GetStakerEarnings(os_tx, identity_addresses) => {
-                    let mut conn = self.pool.acquire().await?;
-                    let payout_members = database::get_payout_members(
-                        &mut conn,
-                        &self.chain_id,
-                        &identity_addresses,
-                    )
-                    .await?;
-
-                    let mut hm = HashMap::new();
-
-                    for pm in payout_members {
-                        hm.entry(pm.identity_address.clone())
-                            .and_modify(|bal: &mut StakerEarnings| {
-                                if pm.txid.is_none() {
-                                    bal.pending += pm.reward
-                                } else {
-                                    bal.paid += pm.reward
-                                }
-                            })
-                            .or_insert(StakerEarnings::from(pm));
-                    }
-
-                    if os_tx.send(hm).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
-                CoinStakerMessage::GetStakingBalance(os_tx, identity_addresses) => {
-                    let verus_client = self.verusd()?;
-
-                    let active_addresses = if identity_addresses.is_empty() {
-                        database::get_stakers_by_status(
-                            &self.pool,
-                            &self.chain_id,
-                            StakerStatus::Active,
-                        )
-                        .await?
-                        .into_iter()
-                        .map(|staker| staker.identity_address)
-                        .collect::<Vec<_>>()
-                    } else {
-                        database::get_stakers_by_identity_address(
-                            &self.pool,
-                            &self.chain_id,
-                            &identity_addresses,
-                        )
-                        .await?
-                        .into_iter()
-                        .map(|staker| staker.identity_address)
-                        .collect::<Vec<_>>()
-                    };
-
-                    let utxos = if !active_addresses.is_empty() {
-                        verus_client.list_unspent(
-                            Some(150),
-                            None,
-                            Some(active_addresses.as_ref()),
-                        )?
-                    } else {
-                        vec![]
-                    };
-
-                    let payload = utxos
-                        .into_iter()
-                        .filter(|utxo| utxo.amount.is_positive())
-                        // unwrap because we already filtered the positive
-                        .map(|utxo| (utxo.address.unwrap(), utxo.amount.to_unsigned().unwrap()))
-                        .fold(HashMap::new(), |mut acc, (address, amount)| {
-                            let _ = *acc
-                                .entry(address)
-                                .and_modify(|a| *a += amount)
-                                .or_insert(amount);
-                            acc
-                        });
-
-                    if os_tx.send(payload).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
-                CoinStakerMessage::PoolPrimaryAddress(os_tx) => {
-                    let pool_address = self.config.pool_primary_address.to_string();
-
-                    if os_tx.send(pool_address).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
-                }
                 CoinStakerMessage::SetStaking(enable_staking) => {
                     let verus_client = self.verusd()?;
 
                     verus_client.set_generate(enable_staking, 0)?;
-                }
-                CoinStakerMessage::GetStatistics(os_tx) => {
-                    let (stakes, stakers, rewards) = tokio::try_join!(
-                        database::get_number_of_matured_stakes(&self.pool, &self.chain_id),
-                        database::get_number_of_active_stakers(&self.pool, &self.chain_id),
-                        database::get_total_rewards(&self.pool, &self.chain_id)
-                    )?;
-
-                    let pool_staking_supply =
-                        self.verusd()?.get_wallet_info()?.eligible_staking_balance;
-
-                    let stats = Stats {
-                        stakes,
-                        pool_staking_supply,
-                        paid: rewards,
-                        stakers,
-                    };
-
-                    if os_tx.send(stats).is_err() {
-                        Err(anyhow!("the sender dropped"))?
-                    }
                 }
                 CoinStakerMessage::CheckBlockManually(os_tx, height) => {
                     let block_hash = self.verusd()?.get_block_by_height(height, 1)?.hash;
@@ -437,7 +255,16 @@ impl CoinStaker {
     ///
     /// An exception is made when an UTXO is cooling down after mining a block
     /// for the staking pool. It is still counted towards work.
-    async fn add_work(&self, active_stakers: &[Staker], blockheight: u64) -> Result<()> {
+    ///
+    /// `listunspent(minconf=150)` drops the spent staking UTXO immediately and only
+    /// includes the new coinbase at confirmations >= 150 (height N+149). Credit
+    /// `source_amount` for find height N through N+148 so the snapshot stays flat.
+    async fn add_work(
+        &self,
+        active_stakers: &[Staker],
+        blockheight: u64,
+        current_stake: Option<&Stake>,
+    ) -> Result<()> {
         let verus_client = self.verusd()?;
 
         let active_staker_addresses = active_stakers
@@ -448,10 +275,14 @@ impl CoinStaker {
         let pool_extra = Self::eligible_sats(&verus_client, vec![self.config.pool_address.clone()])?;
 
         if active_staker_addresses.is_empty() {
+            let mut payload = HashMap::new();
+            if let Some(stake) = current_stake {
+                Self::credit_spent_stake(&mut payload, stake);
+            }
             database::store_work(
                 &self.pool,
                 &self.chain_id,
-                HashMap::new(),
+                payload,
                 blockheight,
                 pool_extra,
             )
@@ -483,19 +314,12 @@ impl CoinStaker {
             database::get_stakes_to_compensate(&self.pool, &self.chain_id, blockheight as i64)
                 .await?;
 
-        stakes_to_compensate.iter().for_each(|stake| {
-            if payload.contains_key(&stake.found_by) {
-                payload.entry(stake.found_by.clone()).and_modify(|v| {
-                    debug!(
-                        amount_to_add = %stake.source_amount.as_vrsc(),
-                        staker = %stake.found_by,
-                        blockheight = &stake.block_height,
-                        "compensate work of immature utxo because it staked"
-                    );
-                    *v += Decimal::from_i64(stake.source_amount.as_sat() as i64).unwrap()
-                });
-            }
-        });
+        for stake in &stakes_to_compensate {
+            Self::credit_spent_stake(&mut payload, stake);
+        }
+        if let Some(stake) = current_stake {
+            Self::credit_spent_stake(&mut payload, stake);
+        }
 
         debug!(?payload, %pool_extra, "storing work");
 
@@ -509,6 +333,20 @@ impl CoinStaker {
         .await?;
 
         Ok(())
+    }
+
+    fn credit_spent_stake(payload: &mut HashMap<Address, Decimal>, stake: &Stake) {
+        let amount = Decimal::from_i64(stake.source_amount.as_sat() as i64).unwrap_or(Decimal::ZERO);
+        if amount.is_zero() {
+            return;
+        }
+        debug!(
+            amount_to_add = %stake.source_amount.as_vrsc(),
+            staker = %stake.found_by,
+            blockheight = stake.block_height,
+            "compensate work of immature utxo because it staked"
+        );
+        *payload.entry(stake.found_by.clone()).or_insert(Decimal::ZERO) += amount;
     }
 
     fn eligible_sats(client: &VerusClient, addresses: Vec<Address>) -> Result<Decimal> {
@@ -527,21 +365,19 @@ impl CoinStaker {
     }
 
     #[instrument(skip(self))]
-    async fn check_for_stake(&self, block_hash: &BlockHash) -> Result<()> {
-        if let Some(stake) = self.is_stake(block_hash).await? {
-            info!(height = %stake.block_height, ">>>>>>>>>>>>>>> stake found");
+    async fn commit_stake(&self, stake: Stake) -> Result<()> {
+        info!(height = %stake.block_height, ">>>>>>>>>>>>>>> stake found");
 
-            database::store_new_stake(&self.pool, &stake, true).await?;
+        database::store_new_stake(&self.pool, &stake, true).await?;
 
-            let client = self.verusd()?;
-            let currency_name = client
-                .get_currency(&stake.currency_address.to_string())?
-                .fullyqualifiedname;
+        let client = self.verusd()?;
+        let currency_name = client
+            .get_currency(&stake.currency_address.to_string())?
+            .fullyqualifiedname;
 
-            self.webhooks
-                .send(WebhookMessage::new_stake(currency_name, &stake))
-                .await;
-        }
+        self.webhooks
+            .send(WebhookMessage::new_stake(currency_name, &stake))
+            .await;
 
         Ok(())
     }
@@ -635,46 +471,88 @@ impl CoinStaker {
         false
     }
 
-    /// Gets the staking supply of the given addresses
-    ///
-    /// Clients should figure out themselves whether the address is a staker in their pool.
-    ///
-    /// Addresses that are given but not known in this pool will return 0.
-    async fn get_staking_supply(&self, identity_addresses: Vec<Address>) -> Result<StakingSupply> {
-        let verus_client = self.verusd()?;
-        let block_height = verus_client.get_blockchain_info()?.blocks;
+    fn tip_height(&self) -> Result<u64> {
+        Ok(self.verusd()?.get_blockchain_info()?.blocks)
+    }
 
-        // let active_addresses = identity_addresses
-        let stakers = database::get_stakers_by_identity_address(
-            &self.pool,
-            &self.chain_id,
-            &identity_addresses,
-        )
-        .await?;
+    /// Fill supply + unspent caches for this tip. Runs `getwalletinfo` and
+    /// `listunspent` in parallel so a miss is ~1.7s instead of both in series.
+    async fn refresh_http_caches(&mut self) -> Result<()> {
+        let height = self.tip_height()?;
+        let need_supply = self
+            .supply_cache
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|c| c.height)
+            != Some(height);
+        let need_unspent = self
+            .unspent_cache
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|c| c.height)
+            != Some(height);
+        if !need_supply && !need_unspent {
+            return Ok(());
+        }
 
-        let identity_addresses = stakers
-            .into_iter()
-            .filter(|s| {
-                let is_subscribed = s.status == StakerStatus::Active;
-                let is_cooled_down = if let Ok(identity) =
-                    verus_client.get_identity_history(&s.identity_address.to_string(), 0, 9999999)
-                {
-                    let block = verus_client.get_block_by_height(block_height, 2).unwrap();
+        let chain_config = self.config.chain_config.clone();
+        let supply_cfg = need_supply.then(|| chain_config.clone());
+        let unspent_cfg = need_unspent.then(|| chain_config);
+        let addresses = if need_unspent {
+            database::get_stakers_by_status(&self.pool, &self.chain_id, StakerStatus::Active)
+                .await?
+                .into_iter()
+                .map(|s| s.identity_address)
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
 
-                    identity.blockheight < block.height.saturating_sub(6) as i64
-                } else {
-                    false
-                };
+        let supply_task = tokio::task::spawn_blocking(move || {
+            let Some(cfg) = supply_cfg else {
+                return anyhow::Ok(None);
+            };
+            let client: VerusClient = (&cfg).try_into()?;
+            let eligible = client.get_wallet_info()?.eligible_staking_balance;
+            let network = client.get_mining_info()?.stakingsupply;
+            Ok(Some((eligible, network)))
+        });
+        let unspent_task = tokio::task::spawn_blocking(move || {
+            let Some(cfg) = unspent_cfg else {
+                return anyhow::Ok(None);
+            };
+            if addresses.is_empty() {
+                return Ok(Some(HashMap::new()));
+            }
+            let client: VerusClient = (&cfg).try_into()?;
+            let utxos = client.list_unspent(Some(150), None, Some(&addresses))?;
+            Ok(Some(fold_unspent(utxos)))
+        });
 
-                is_subscribed && is_cooled_down
-            })
-            .map(|s| s.identity_address)
-            .collect::<Vec<_>>();
-
-        let staking_supply =
-            get_staking_supply(&self.chain_id, &identity_addresses, &verus_client)?;
-
-        Ok(staking_supply)
+        let (supply, unspent) = tokio::try_join!(supply_task, unspent_task)
+            .map_err(|e| anyhow!("http cache refresh: {e}"))?;
+        if let Some((eligible, network)) = supply? {
+            *self
+                .supply_cache
+                .write()
+                .unwrap_or_else(|e| e.into_inner()) = Some(SupplyCache {
+                height,
+                eligible,
+                network,
+            });
+        }
+        if let Some(map) = unspent? {
+            *self
+                .unspent_cache
+                .write()
+                .unwrap_or_else(|e| e.into_inner()) = Some(UnspentCache {
+                height,
+                by_address: map,
+            });
+        }
+        Ok(())
     }
 
     async fn check_stakers(
@@ -897,35 +775,7 @@ impl IntoSubsystem<anyhow::Error> for CoinStaker {
 #[derive(Debug)]
 pub enum CoinStakerMessage {
     Block(BlockHash),
-    StakingSupply(oneshot::Sender<StakingSupply>, Vec<Address>),
     StakerStatus(oneshot::Sender<Option<Staker>>, Address),
-    SetStakerFee(oneshot::Sender<Option<Staker>>, Address, Decimal),
-    GetStakers(
-        oneshot::Sender<Vec<Staker>>,
-        Vec<Address>,
-        Option<StakerStatus>,
-    ),
-    GetStakerEarnings(
-        oneshot::Sender<HashMap<Address, StakerEarnings>>,
-        Vec<Address>,
-    ),
-    GetStakingBalance(oneshot::Sender<HashMap<Address, Amount>>, Vec<Address>),
-    GetPayouts(
-        oneshot::Sender<Vec<PayoutMember>>,
-        Vec<Address>,
-        Option<u32>,
-        Option<u64>,
-    ),
-    GetStakes(
-        oneshot::Sender<Vec<Stake>>,
-        Option<StakeStatus>,
-        Option<u32>,
-        Option<u64>,
-    ),
-    GetWork(oneshot::Sender<Vec<WorkShare>>),
-    GetStatistics(oneshot::Sender<Stats>),
-    GetHistory(oneshot::Sender<crate::http::constants::PoolHistory>),
-    PoolPrimaryAddress(oneshot::Sender<String>),
     SetStaking(bool),
     CheckBlockManually(oneshot::Sender<()>, u64),
 }

@@ -15,6 +15,8 @@ pub struct Stats {
     pub stakes: i64,
     #[serde(with = "as_sat")]
     pub pool_staking_supply: Amount,
+    /// Network eligible staking supply from `getmininginfo` (VRSC).
+    pub network_staking_supply: f64,
     #[serde(with = "as_sat")]
     pub paid: Amount,
     pub stakers: i64,

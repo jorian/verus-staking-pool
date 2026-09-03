@@ -1,6 +1,7 @@
 pub mod coinstaker;
 mod config;
 pub mod constants;
+pub mod handle;
 pub mod http;
 #[cfg(feature = "mock")]
 mod mock;
@@ -11,3 +12,4 @@ pub use config::ChainConfig;
 pub use config::Config;
 pub use config::PayoutConfig;
 pub use constants::StakerStatus;
+pub use handle::CoinStakerHandle;

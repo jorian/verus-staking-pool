@@ -48,6 +48,7 @@ impl App {
             let currency_id = coin_config.currency_id.clone();
             let coin_staker =
                 CoinStaker::new(self.pool.clone(), coin_config.clone(), tx.clone(), rx)?;
+            coin_staker_map.insert(currency_id.clone(), coin_staker.handle());
             coin_stakers.push(coin_staker);
 
             let payout = payout_service::Service::new(
@@ -64,8 +65,6 @@ impl App {
             if start_staking {
                 tx.send(CoinStakerMessage::SetStaking(true)).await?;
             }
-
-            coin_staker_map.insert(currency_id, tx);
         }
 
         let http_service = HttpService {

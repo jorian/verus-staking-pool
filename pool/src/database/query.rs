@@ -462,10 +462,12 @@ pub async fn get_matured_stakes_without_payout(
     Ok(rows)
 }
 
-/// Returns stakes that are above <block_height> and are either maturing or have matured.
+/// Stakes whose spent UTXO is still missing from `listunspent(minconf=150)`.
 ///
-/// This is useful to compensate for work that is lost due to maturing UTXOs because they were
-/// spent because of staking.
+/// Find height N: UTXO gone immediately. New coinbase is eligible at height
+/// N+149 (150 confirmations). Credit `source_amount` for N..=N+148, i.e.
+/// `N > B-149 && N <= B`. The find block itself is passed into `add_work`
+/// in-memory because it is not stored until after work is written.
 pub async fn get_stakes_to_compensate(
     pool: &PgPool,
     currency_address: &Address,
@@ -485,7 +487,8 @@ pub async fn get_stakes_to_compensate(
             status AS "status: _"
         FROM stakes
         WHERE currency_address = $1 AND
-            block_height > ($2 - 150) AND
+            block_height > ($2 - 149) AND
+            block_height <= $2 AND
             (status = 'MATURED' OR status = 'MATURING')
         ORDER BY block_height ASC"#,
         currency_address.to_string(),
@@ -1420,6 +1423,63 @@ mod tests {
         assert!(history[1].current);
         let work = get_work(&pool, &currency).await.unwrap();
         assert_eq!(work[0].shares, Decimal::from_f64_retain(220.0).unwrap());
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn compensate_window_is_find_height_through_plus_148(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let found_by = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let n = 1000i64;
+        sqlx::query(
+            "INSERT INTO stakes (
+                currency_address, block_hash, block_height, amount, found_by,
+                source_txid, source_vout_num, source_amount, status
+            ) VALUES ($1, $2, $3, 1, $4, $5, 0, 50000000, 'MATURING')",
+        )
+        .bind(currency.to_string())
+        .bind("00000000000000000000000000000000000000000000000000000000000000aa")
+        .bind(n)
+        .bind(found_by.to_string())
+        .bind("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ids = |stakes: Vec<Stake>| {
+            stakes
+                .into_iter()
+                .map(|s| s.block_height)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            ids(get_stakes_to_compensate(&pool, &currency, n).await.unwrap()),
+            vec![1000]
+        );
+        assert_eq!(
+            ids(get_stakes_to_compensate(&pool, &currency, n + 1)
+                .await
+                .unwrap()),
+            vec![1000]
+        );
+        assert_eq!(
+            ids(get_stakes_to_compensate(&pool, &currency, n + 148)
+                .await
+                .unwrap()),
+            vec![1000]
+        );
+        assert!(
+            get_stakes_to_compensate(&pool, &currency, n + 149)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            get_stakes_to_compensate(&pool, &currency, n - 1)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[sqlx::test(migrations = "sql/migrations")]
