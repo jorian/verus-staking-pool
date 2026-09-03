@@ -104,8 +104,8 @@ async fn my_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if let Some(currency_id) = state.controller.coin_stakers.get(&currency).cloned() {
-        request.extensions_mut().insert(currency_id);
+    if let Some(handle) = state.controller.coin_stakers.get(&currency).cloned() {
+        request.extensions_mut().insert(handle);
 
         Ok(next.run(request).await)
     } else {

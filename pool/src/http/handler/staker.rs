@@ -1,16 +1,14 @@
 use std::collections::HashMap;
 
-use anyhow::Context;
 use axum::{extract::Query, Extension};
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use tokio::sync::{mpsc, oneshot};
-use vrsc_rpc::json::vrsc::{Address, Amount};
+use vrsc_rpc::json::vrsc::Address;
 
 use crate::{
     coinstaker::{
-        coinstaker::CoinStakerMessage,
         constants::{Staker, StakerEarnings},
+        CoinStakerHandle,
     },
     http::handler::{
         params::{GetStakerArgs, IdentityQuery},
@@ -52,18 +50,10 @@ pub struct StakerStatusArgs {
 ///
 /// For more information about the Staker object, see <Staker>
 pub async fn staker_status(
-    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+    Extension(cs): Extension<CoinStakerHandle>,
     Query(args): Query<StakerStatusArgs>,
 ) -> Result<AppJson<Staker>, AppError> {
-    let (os_tx, os_rx) = oneshot::channel::<Option<Staker>>();
-
-    tx.send(CoinStakerMessage::StakerStatus(os_tx, args.address))
-        .await
-        .context("Could not send Coinstaker message")?;
-
-    let res = os_rx.await.context("Sender dropped")?;
-
-    if let Some(staker) = res {
+    if let Some(staker) = cs.staker_status(args.address).await? {
         Ok(AppJson(staker))
     } else {
         Err(AppError::NotFound)
@@ -76,67 +66,39 @@ pub async fn staker_status(
 /// `staker_status` (`active`, `cooling_down`, `inactive`). Repeated `identity_address`
 /// (or `identity_addresses`) limits the result to those VerusIDs; unknown ids are ignored.
 pub async fn get_stakers(
-    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+    Extension(cs): Extension<CoinStakerHandle>,
     axum_extra::extract::Query(args): axum_extra::extract::Query<GetStakerArgs>,
 ) -> Result<AppJson<Vec<Staker>>, AppError> {
-    let (os_tx, os_rx) = oneshot::channel::<Vec<Staker>>();
-
-    tx.send(CoinStakerMessage::GetStakers(
-        os_tx,
-        args.identities.addresses(),
-        args.staker_status,
+    Ok(AppJson(
+        cs.stakers(args.identities.addresses(), args.staker_status)
+            .await?,
     ))
-    .await
-    .context("Could not send Coinstaker message")?;
-
-    let res = os_rx.await.context("Sender dropped")?;
-
-    Ok(AppJson(res))
 }
 
 /// Returns an array of balances, based on the provided VerusIDs.
 ///
 /// The balances represent how much each staker has earned in the pool
 pub async fn get_staker_earnings(
-    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+    Extension(cs): Extension<CoinStakerHandle>,
     Query(args): Query<Vec<(String, Address)>>,
 ) -> Result<AppJson<HashMap<Address, StakerEarnings>>, AppError> {
-    let (os_tx, os_rx) = oneshot::channel::<HashMap<Address, StakerEarnings>>();
-
     let args = args.into_iter().map(|arg| arg.1).collect::<Vec<_>>();
-
-    tx.send(CoinStakerMessage::GetStakerEarnings(os_tx, args))
-        .await
-        .context("Could not send Coinstaker message")?;
-
-    let map = os_rx.await.context("Sender dropped")?;
-
-    Ok(AppJson(map))
+    Ok(AppJson(cs.staker_earnings(args).await?))
 }
 
 /// Returns eligible staking balances.
 ///
 /// Omit `identity_address` to return balances for every **active** staker.
 pub async fn get_staking_balance(
-    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+    Extension(cs): Extension<CoinStakerHandle>,
     axum_extra::extract::Query(args): axum_extra::extract::Query<IdentityQuery>,
 ) -> Result<AppJson<HashMap<Address, f64>>, AppError> {
-    let (os_tx, os_rx) = oneshot::channel::<HashMap<Address, Amount>>();
-
-    tx.send(CoinStakerMessage::GetStakingBalance(
-        os_tx,
-        args.addresses(),
-    ))
-    .await
-    .context("Could not send Coinstaker message")?;
-
-    let balances = os_rx
-        .await
-        .context("Sender dropped")?
+    let balances = cs
+        .staking_balance(args.addresses())
+        .await?
         .into_iter()
         .map(|(k, v)| (k, v.as_vrsc()))
         .collect();
-
     Ok(AppJson(balances))
 }
 
@@ -151,7 +113,7 @@ pub struct SetStakerFeeArgs {
 /// `fee` is a decimal fraction: 0.01 = 1%. Must be between 0 and 1 inclusive.
 /// Returns the updated staker, or 404 if that identity is not enrolled.
 pub async fn set_staker_fee(
-    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+    Extension(cs): Extension<CoinStakerHandle>,
     AppJson(args): AppJson<SetStakerFeeArgs>,
 ) -> Result<AppJson<Staker>, AppError> {
     if args.fee < Decimal::ZERO || args.fee > Decimal::ONE {
@@ -160,15 +122,7 @@ pub async fn set_staker_fee(
         ));
     }
 
-    let (os_tx, os_rx) = oneshot::channel::<Option<Staker>>();
-
-    tx.send(CoinStakerMessage::SetStakerFee(os_tx, args.address, args.fee))
-        .await
-        .context("Could not send Coinstaker message")?;
-
-    let res = os_rx.await.context("Sender dropped")?;
-
-    if let Some(staker) = res {
+    if let Some(staker) = cs.set_staker_fee(args.address, args.fee).await? {
         Ok(AppJson(staker))
     } else {
         Err(AppError::NotFound)
