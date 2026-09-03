@@ -135,6 +135,18 @@ impl CoinStaker {
                         .send(opt_staker)
                         .expect("a oneshot message failed to send");
                 }
+                CoinStakerMessage::SetStakerFee(os_tx, identity_address, fee) => {
+                    let staker = database::update_staker_fee(
+                        &self.pool,
+                        &self.chain_id,
+                        &identity_address,
+                        fee,
+                    )
+                    .await?;
+                    if os_tx.send(staker).is_err() {
+                        Err(anyhow!("the sender dropped"))?
+                    }
+                }
                 CoinStakerMessage::GetStakers(os_tx, identity_addresses, staker_status) => {
                     let mut stakers = if let Some(status) = staker_status {
                         database::get_stakers_by_status(&self.pool, &self.chain_id, status).await?
@@ -433,7 +445,17 @@ impl CoinStaker {
             .map(|subscriber| subscriber.identity_address.clone())
             .collect::<Vec<Address>>();
 
+        let pool_extra = Self::eligible_sats(&verus_client, vec![self.config.pool_address.clone()])?;
+
         if active_staker_addresses.is_empty() {
+            database::store_work(
+                &self.pool,
+                &self.chain_id,
+                HashMap::new(),
+                blockheight,
+                pool_extra,
+            )
+            .await?;
             return Ok(());
         }
 
@@ -475,11 +497,33 @@ impl CoinStaker {
             }
         });
 
-        debug!(?payload, "storing work");
+        debug!(?payload, %pool_extra, "storing work");
 
-        database::store_work(&self.pool, &self.chain_id, payload, blockheight).await?;
+        database::store_work(
+            &self.pool,
+            &self.chain_id,
+            payload,
+            blockheight,
+            pool_extra,
+        )
+        .await?;
 
         Ok(())
+    }
+
+    fn eligible_sats(client: &VerusClient, addresses: Vec<Address>) -> Result<Decimal> {
+        if addresses.is_empty() {
+            return Ok(Decimal::ZERO);
+        }
+        let utxos = client.list_unspent(Some(150), None, Some(&addresses))?;
+        let mut total = Decimal::ZERO;
+        for utxo in utxos {
+            if !utxo.amount.is_positive() {
+                continue;
+            }
+            total += Decimal::from_u64(utxo.amount.to_unsigned().unwrap().as_sat()).unwrap();
+        }
+        Ok(total)
     }
 
     #[instrument(skip(self))]
@@ -855,6 +899,7 @@ pub enum CoinStakerMessage {
     Block(BlockHash),
     StakingSupply(oneshot::Sender<StakingSupply>, Vec<Address>),
     StakerStatus(oneshot::Sender<Option<Staker>>, Address),
+    SetStakerFee(oneshot::Sender<Option<Staker>>, Address, Decimal),
     GetStakers(
         oneshot::Sender<Vec<Staker>>,
         Vec<Address>,

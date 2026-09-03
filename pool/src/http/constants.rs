@@ -28,10 +28,15 @@ pub struct WorkShare {
 }
 
 /// Pool staking supply at a block, reconstructed from `work.shares` (sats).
+///
+/// `current` is true when this point is the open round (`work.round = 0`),
+/// plotted at the chain's last processed height.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StakingBalancePoint {
     pub height: i64,
     pub sats: String,
+    #[serde(default)]
+    pub current: bool,
 }
 
 /// Cumulative number of pool stakes at a block height.

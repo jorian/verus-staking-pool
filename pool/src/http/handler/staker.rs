@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use axum::{extract::Query, Extension};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
 use vrsc_rpc::json::vrsc::{Address, Amount};
@@ -137,4 +138,39 @@ pub async fn get_staking_balance(
         .collect();
 
     Ok(AppJson(balances))
+}
+
+#[derive(Deserialize, Debug)]
+pub struct SetStakerFeeArgs {
+    pub address: Address,
+    pub fee: Decimal,
+}
+
+/// Sets the pool fee for an enrolled staker.
+///
+/// `fee` is a decimal fraction: 0.01 = 1%. Must be between 0 and 1 inclusive.
+/// Returns the updated staker, or 404 if that identity is not enrolled.
+pub async fn set_staker_fee(
+    Extension(tx): Extension<mpsc::Sender<CoinStakerMessage>>,
+    AppJson(args): AppJson<SetStakerFeeArgs>,
+) -> Result<AppJson<Staker>, AppError> {
+    if args.fee < Decimal::ZERO || args.fee > Decimal::ONE {
+        return Err(AppError::BadRequest(
+            "fee must be a decimal between 0 and 1".to_owned(),
+        ));
+    }
+
+    let (os_tx, os_rx) = oneshot::channel::<Option<Staker>>();
+
+    tx.send(CoinStakerMessage::SetStakerFee(os_tx, args.address, args.fee))
+        .await
+        .context("Could not send Coinstaker message")?;
+
+    let res = os_rx.await.context("Sender dropped")?;
+
+    if let Some(staker) = res {
+        Ok(AppJson(staker))
+    } else {
+        Err(AppError::NotFound)
+    }
 }
