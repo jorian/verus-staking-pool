@@ -39,6 +39,9 @@ pub struct Service {
     chain_config: ChainConfig,
     webhooks: Webhook,
     notified_stuck_batches: Mutex<HashSet<Uuid>>,
+    /// Set after allocating a matured stake so leavers are paid once in-flight
+    /// (if any) has cleared. Not used for the periodic active send.
+    pending_inactive_payout: Mutex<bool>,
 }
 
 impl Service {
@@ -60,6 +63,7 @@ impl Service {
             chain_config,
             webhooks: Webhook::new(webhook_endpoints)?,
             notified_stuck_batches: Mutex::new(HashSet::new()),
+            pending_inactive_payout: Mutex::new(false),
         })
     }
 
@@ -118,6 +122,7 @@ impl Service {
     async fn new_payout(&self) -> Result<()> {
         let stakes =
             database::get_matured_stakes_without_payout(&self.database, &self.chain_id).await?;
+        let mut allocated = false;
 
         for stake in stakes {
             let workers =
@@ -143,31 +148,82 @@ impl Service {
                 .await?;
 
             tx.commit().await?;
+            allocated = true;
+        }
+
+        if allocated {
+            *self.pending_inactive_payout.lock().unwrap() = true;
+            self.send_unpaid_for_inactive().await?;
         }
 
         Ok(())
     }
 
-    async fn send_unsent_payouts(&self) -> Result<()> {
+    async fn has_in_flight(&self) -> Result<bool> {
+        Ok(!database::get_in_flight_payout_batches(&self.database, &self.chain_id)
+            .await?
+            .is_empty())
+    }
+
+    async fn resume_all_in_flight(&self) -> Result<()> {
         let in_flight =
             database::get_in_flight_payout_batches(&self.database, &self.chain_id).await?;
+        if in_flight.is_empty() {
+            return Ok(());
+        }
+        if in_flight.len() > 1 {
+            error!(
+                n_batches = in_flight.len(),
+                "multiple in-flight payout batches; not starting a new send"
+            );
+        }
+        for batch in in_flight {
+            self.resume_in_flight(batch).await?;
+        }
+        Ok(())
+    }
 
-        if !in_flight.is_empty() {
-            if in_flight.len() > 1 {
-                error!(
-                    n_batches = in_flight.len(),
-                    "multiple in-flight payout batches; not starting a new send"
-                );
-            }
-            for batch in in_flight {
-                self.resume_in_flight(batch).await?;
-            }
+    /// Pay every inactive staker with unpaid rows in one `sendcurrency`.
+    ///
+    /// No-op while another batch is in flight (the send loop retries after
+    /// that batch finishes). Ignores `min_payout`.
+    async fn send_unpaid_for_inactive(&self) -> Result<()> {
+        if self.has_in_flight().await? {
             return Ok(());
         }
 
         let mut tx = self.database.begin().await?;
+        let unpaid =
+            database::get_unpaid_payout_members_for_inactive(&mut tx, &self.chain_id).await?;
+        if unpaid.is_empty() {
+            tx.commit().await?;
+            *self.pending_inactive_payout.lock().unwrap() = false;
+            return Ok(());
+        }
 
-        // NB: these are already filtered on min_payout settings
+        let batch_id = Uuid::new_v4();
+        database::claim_payout_members(&mut tx, batch_id, &unpaid).await?;
+        tx.commit().await?;
+
+        info!(
+            n_members = unpaid.len(),
+            n_identities = unpaid
+                .iter()
+                .map(|m| m.identity_address.to_string())
+                .collect::<HashSet<_>>()
+                .len(),
+            %batch_id,
+            "sending leave payout for inactive stakers"
+        );
+        let result = self.submit_claimed_batch(batch_id, &unpaid).await;
+        if result.is_ok() {
+            *self.pending_inactive_payout.lock().unwrap() = false;
+        }
+        result
+    }
+
+    async fn send_active_unpaid(&self) -> Result<()> {
+        let mut tx = self.database.begin().await?;
         let unpaid_payout_members =
             database::get_unpaid_payout_members(&mut tx, &self.chain_id).await?;
 
@@ -180,7 +236,16 @@ impl Service {
         database::claim_payout_members(&mut tx, batch_id, &unpaid_payout_members).await?;
         tx.commit().await?;
 
-        let outputs = prepare_payment(&unpaid_payout_members)?;
+        self.submit_claimed_batch(batch_id, &unpaid_payout_members)
+            .await
+    }
+
+    async fn submit_claimed_batch(
+        &self,
+        batch_id: Uuid,
+        unpaid_payout_members: &[PayoutMember],
+    ) -> Result<()> {
+        let outputs = prepare_payment(&unpaid_payout_members.to_vec())?;
         debug!(n_outputs = outputs.len(), ?outputs, "sending outputs");
         let client: Client = (&self.chain_config).try_into()?;
 
@@ -196,6 +261,22 @@ impl Service {
         database::set_payment_opid_for_batch(&self.database, batch_id, &opid).await?;
 
         self.finish_submitted_batch(batch_id, &opid).await
+    }
+
+    async fn send_unsent_payouts(&self) -> Result<()> {
+        self.resume_all_in_flight().await?;
+        if self.has_in_flight().await? {
+            return Ok(());
+        }
+
+        if *self.pending_inactive_payout.lock().unwrap() {
+            self.send_unpaid_for_inactive().await?;
+            if self.has_in_flight().await? {
+                return Ok(());
+            }
+        }
+
+        self.send_active_unpaid().await
     }
 
     async fn resume_in_flight(&self, batch: InFlightPayoutBatch) -> Result<()> {

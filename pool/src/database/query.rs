@@ -822,11 +822,11 @@ pub async fn get_payout_members_page(
     Ok(values)
 }
 
-/// Get all payout members that have not been paid yet.
+/// Get unpaid payout members for the periodic send.
 ///
-/// The payoutmembers are selected on their min_payout settings.
-/// If a staker has left the pool, all remaining funds will be paid, disregarding
-/// the min_payout settings of the staker.
+/// Active and cooling-down stakers must meet `min_payout`. Inactive
+/// (left) stakers are excluded; they are paid via
+/// [`get_unpaid_payout_members_for_inactive`].
 ///
 /// The query locks the rows until the transaction is committed (or dropped on error).
 pub async fn get_unpaid_payout_members(
@@ -859,8 +859,71 @@ pub async fn get_unpaid_payout_members(
             AND pm.payment_batch_id IS NULL
         JOIN stakers s ON pm.currency_address = s.currency_address
             AND pm.identity_address = s.identity_address
-        WHERE pm_sum.total_rewards >= s.min_payout 
-            OR s.status = 'INACTIVE'
+        WHERE pm_sum.total_rewards >= s.min_payout
+            AND s.status <> 'INACTIVE'
+        FOR UPDATE",
+        currency_address.to_string(),
+    )
+    .try_map(PayoutMember::try_from)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    Ok(values)
+}
+
+/// Unpaid rows for stakers who have left (`INACTIVE`), ignoring `min_payout`.
+///
+/// Skip anyone who still has unallocated work: round 0 (since the last find)
+/// or a round whose stake is still `MATURING`. Otherwise a restart or an
+/// older find maturing would pay them while leftover shares remain.
+pub async fn get_unpaid_payout_members_for_inactive(
+    conn: &mut PgConnection,
+    currency_address: &Address,
+) -> Result<Vec<PayoutMember>> {
+    let values = sqlx::query_as!(
+        DbPayoutMember,
+        "WITH pm_sum AS (
+            SELECT currency_address, identity_address, SUM(reward) AS total_rewards
+            FROM payout_members
+            WHERE currency_address = $1
+                AND txid IS NULL
+                AND payment_batch_id IS NULL
+            GROUP BY currency_address, identity_address
+        )
+        SELECT
+            pm.currency_address,
+            pm.identity_address,
+            pm.block_hash,
+            pm.block_height,
+            pm.shares,
+            pm.reward,
+            pm.fee,
+            pm.txid
+        FROM payout_members pm
+        JOIN pm_sum ON pm.currency_address = pm_sum.currency_address
+            AND pm.identity_address = pm_sum.identity_address
+            AND pm.txid IS NULL
+            AND pm.payment_batch_id IS NULL
+        JOIN stakers s ON pm.currency_address = s.currency_address
+            AND pm.identity_address = s.identity_address
+        WHERE s.status = 'INACTIVE'
+            AND NOT EXISTS (
+                SELECT 1
+                FROM work w
+                WHERE w.currency_address = s.currency_address
+                    AND w.staker_address = s.identity_address
+                    AND w.shares > 0
+                    AND (
+                        w.round = 0
+                        OR EXISTS (
+                            SELECT 1
+                            FROM stakes st
+                            WHERE st.currency_address = w.currency_address
+                                AND st.block_height = w.round
+                                AND st.status = 'MATURING'
+                        )
+                    )
+            )
         FOR UPDATE",
         currency_address.to_string(),
     )
@@ -1606,7 +1669,9 @@ mod tests {
         .unwrap();
 
         let mut tx = pool.begin().await.unwrap();
-        let unpaid = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        let unpaid = get_unpaid_payout_members_for_inactive(&mut tx, &currency)
+            .await
+            .unwrap();
         let batch_id = Uuid::new_v4();
         claim_payout_members(&mut tx, batch_id, &unpaid)
             .await
@@ -1616,7 +1681,9 @@ mod tests {
         unclaim_payout_batch(&pool, batch_id).await.unwrap();
 
         let mut tx = pool.begin().await.unwrap();
-        let unpaid = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        let unpaid = get_unpaid_payout_members_for_inactive(&mut tx, &currency)
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         assert_eq!(unpaid.len(), 1);
         assert!(get_in_flight_payout_batches(&pool, &currency)
@@ -1663,5 +1730,198 @@ mod tests {
         tx.commit().await.unwrap();
         assert_eq!(unpaid.len(), 1);
         assert_eq!(unpaid[0].reward.as_sat(), min_payout as u64);
+    }
+
+    async fn insert_payout_member(
+        pool: &PgPool,
+        currency: &Address,
+        identity: &Address,
+        hash_suffix: &str,
+        reward: i64,
+    ) {
+        sqlx::query(
+            "INSERT INTO payout_members (
+                currency_address, identity_address, block_hash, block_height,
+                shares, reward, fee, txid
+            ) VALUES ($1, $2, $3, 1, 1, $4, 0, NULL)",
+        )
+        .bind(currency.to_string())
+        .bind(identity.to_string())
+        .bind(format!(
+            "00000000000000000000000000000000000000000000000000000000000000{hash_suffix}"
+        ))
+        .bind(reward)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn periodic_unpaid_excludes_inactive_below_min_payout(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        sqlx::query(
+            "INSERT INTO stakers (
+                currency_address, identity_address, identity_name, status, min_payout, fee
+            ) VALUES ($1, $2, 'alice', 'INACTIVE', 100000000, 0)",
+        )
+        .bind(currency.to_string())
+        .bind(alice.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        insert_payout_member(&pool, &currency, &alice, "aa", 1).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        let periodic = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        let inactive = get_unpaid_payout_members_for_inactive(&mut tx, &currency)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        assert!(periodic.is_empty());
+        assert_eq!(inactive.len(), 1);
+        assert_eq!(inactive[0].identity_address, alice);
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn inactive_unpaid_excludes_active_over_min_payout(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let bob = Address::from_str("iGLN3bFv6uY2HAgQgVwiGriTRgQmTyJrwi").unwrap();
+        insert_staker(&pool, &currency, &alice, "alice", "ACTIVE").await;
+        sqlx::query(
+            "INSERT INTO stakers (
+                currency_address, identity_address, identity_name, status, min_payout, fee
+            ) VALUES ($1, $2, 'bob', 'INACTIVE', 100000000, 0)",
+        )
+        .bind(currency.to_string())
+        .bind(bob.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        insert_payout_member(&pool, &currency, &alice, "aa", 100_000_000).await;
+        insert_payout_member(&pool, &currency, &bob, "bb", 1).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        let periodic = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        let inactive = get_unpaid_payout_members_for_inactive(&mut tx, &currency)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(periodic.len(), 1);
+        assert_eq!(periodic[0].identity_address, alice);
+        assert_eq!(inactive.len(), 1);
+        assert_eq!(inactive[0].identity_address, bob);
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn two_inactive_unpaid_are_one_batch_without_active(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let bob = Address::from_str("iGLN3bFv6uY2HAgQgVwiGriTRgQmTyJrwi").unwrap();
+        let carol = Address::from_str("i73kp4698TGkzT51NfdbmS2h4mYJyd5k5V").unwrap();
+        insert_staker(&pool, &currency, &alice, "alice", "ACTIVE").await;
+        insert_staker(&pool, &currency, &bob, "bob", "INACTIVE").await;
+        insert_staker(&pool, &currency, &carol, "carol", "INACTIVE").await;
+        insert_payout_member(&pool, &currency, &alice, "aa", 100_000_000).await;
+        insert_payout_member(&pool, &currency, &bob, "bb", 1).await;
+        insert_payout_member(&pool, &currency, &carol, "cc", 2).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        let leavers = get_unpaid_payout_members_for_inactive(&mut tx, &currency)
+            .await
+            .unwrap();
+        let batch_id = Uuid::new_v4();
+        claim_payout_members(&mut tx, batch_id, &leavers)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut ids: Vec<_> = leavers
+            .iter()
+            .map(|m| m.identity_address.to_string())
+            .collect();
+        ids.sort();
+        let mut expected = vec![bob.to_string(), carol.to_string()];
+        expected.sort();
+        assert_eq!(ids, expected);
+
+        let in_flight = get_in_flight_payout_batches(&pool, &currency)
+            .await
+            .unwrap();
+        assert_eq!(in_flight.len(), 1);
+        assert_eq!(in_flight[0].members.len(), 2);
+
+        let mut tx = pool.begin().await.unwrap();
+        let periodic = get_unpaid_payout_members(&mut tx, &currency).await.unwrap();
+        let inactive_left = get_unpaid_payout_members_for_inactive(&mut tx, &currency)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(periodic.len(), 1);
+        assert_eq!(periodic[0].identity_address, alice);
+        assert!(inactive_left.is_empty());
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn inactive_with_round_zero_work_is_not_paid_yet(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        insert_staker(&pool, &currency, &alice, "alice", "INACTIVE").await;
+        insert_payout_member(&pool, &currency, &alice, "aa", 1).await;
+        sqlx::query(
+            "INSERT INTO work (currency_address, round, staker_address, shares)
+             VALUES ($1, 0, $2, 1000)",
+        )
+        .bind(currency.to_string())
+        .bind(alice.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let inactive = get_unpaid_payout_members_for_inactive(&mut tx, &currency)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        assert!(inactive.is_empty());
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn inactive_with_maturing_round_work_is_not_paid_yet(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        insert_staker(&pool, &currency, &alice, "alice", "INACTIVE").await;
+        insert_payout_member(&pool, &currency, &alice, "aa", 1).await;
+        sqlx::query(
+            "INSERT INTO stakes (
+                currency_address, block_hash, block_height, amount, found_by,
+                source_txid, source_vout_num, source_amount, status
+            ) VALUES ($1, $2, 50, 1, $3, $4, 0, 1, 'MATURING')",
+        )
+        .bind(currency.to_string())
+        .bind("0000000000000000000000000000000000000000000000000000000000000050")
+        .bind(alice.to_string())
+        .bind("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO work (currency_address, round, staker_address, shares)
+             VALUES ($1, 50, $2, 1000)",
+        )
+        .bind(currency.to_string())
+        .bind(alice.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let inactive = get_unpaid_payout_members_for_inactive(&mut tx, &currency)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        assert!(inactive.is_empty());
     }
 }
