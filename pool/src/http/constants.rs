@@ -29,10 +29,11 @@ pub struct WorkShare {
     pub shares: Decimal,
 }
 
-/// Pool staking supply at a block, reconstructed from `work.shares` (sats).
+/// Eligible pool staking supply at a block (sats), from `work_snapshots`
+/// minus spent staking UTXOs that are still immature. The find height itself
+/// still shows the work amount so the stake marker sits on that point.
 ///
-/// `current` is true when this point is the open round (`work.round = 0`),
-/// plotted at the chain's last processed height.
+/// `current` is true for the latest stored height.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StakingBalancePoint {
     pub height: i64,

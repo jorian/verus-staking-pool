@@ -1080,20 +1080,36 @@ fn take_evenly<T: Clone>(items: &[T], max: usize) -> Vec<T> {
 }
 
 /// Eligible pool staking supply at each block height (one snapshot per block).
+///
+/// Snapshots store work, which still credits a spent staking UTXO for 150
+/// blocks. Subtract that `source_amount` here from the block after the find
+/// through N+148 so the graph dips without moving the stake marker off the
+/// last work amount. Payouts are unchanged.
 pub async fn get_work_history(
     pool: &PgPool,
     currency_address: &Address,
 ) -> Result<Vec<crate::http::constants::StakingBalancePoint>> {
     let rows = sqlx::query!(
-        r#"SELECT height, shares
-        FROM work_snapshots
-        WHERE currency_address = $1
-            AND height > (
+        r#"SELECT w.height,
+            GREATEST(
+                w.shares - COALESCE((
+                    SELECT SUM(s.source_amount)::DECIMAL
+                    FROM stakes s
+                    WHERE s.currency_address = w.currency_address
+                      AND (s.status = 'MATURED' OR s.status = 'MATURING')
+                      AND s.block_height > (w.height - 149)
+                      AND s.block_height < w.height
+                ), 0),
+                0
+            ) AS "shares!"
+        FROM work_snapshots w
+        WHERE w.currency_address = $1
+            AND w.height > (
                 SELECT COALESCE(MAX(height), 0) - 40320
                 FROM work_snapshots
                 WHERE currency_address = $1
             )
-        ORDER BY height"#,
+        ORDER BY w.height"#,
         currency_address.to_string()
     )
     .fetch_all(pool)
@@ -1121,6 +1137,7 @@ pub async fn get_stake_count_history(
         r#"SELECT block_height, COUNT(*) AS "n!"
         FROM stakes
         WHERE currency_address = $1
+          AND status <> 'STALE'
         GROUP BY block_height
         ORDER BY block_height"#,
         currency_address.to_string()
@@ -1423,6 +1440,82 @@ mod tests {
         assert!(history[1].current);
         let work = get_work(&pool, &currency).await.unwrap();
         assert_eq!(work[0].shares, Decimal::from_f64_retain(220.0).unwrap());
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn work_history_subtracts_immature_spent_utxo(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let alice = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        let n = 1000i64;
+        for height in [n, n + 1, n + 148, n + 149] {
+            let mut payload = HashMap::new();
+            payload.insert(alice.clone(), Decimal::from(1000));
+            store_work(&pool, &currency, payload, height as u64, Decimal::ZERO)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO stakes (
+                currency_address, block_hash, block_height, amount, found_by,
+                source_txid, source_vout_num, source_amount, status
+            ) VALUES ($1, $2, $3, 1, $4, $5, 0, 250, 'MATURING')",
+        )
+        .bind(currency.to_string())
+        .bind("00000000000000000000000000000000000000000000000000000000000000aa")
+        .bind(n)
+        .bind(alice.to_string())
+        .bind("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let history = get_work_history(&pool, &currency).await.unwrap();
+        let at = |h: i64| {
+            history
+                .iter()
+                .find(|p| p.height == h)
+                .map(|p| p.sats.as_str())
+                .unwrap()
+        };
+        assert_eq!(at(n), "1000");
+        assert_eq!(at(n + 1), "750");
+        assert_eq!(at(n + 148), "750");
+        assert_eq!(at(n + 149), "1000");
+    }
+
+    #[sqlx::test(migrations = "sql/migrations")]
+    async fn stake_count_history_omits_stale(pool: PgPool) {
+        let currency = Address::from_str("i5w5MuNik5NtLcYmNzcvaoixooEebB6MGV").unwrap();
+        let found_by = Address::from_str("iB5PRXMHLYcNtM8dfLB6KwfJrHU2mKDYuU").unwrap();
+        for (height, hash, status) in [
+            (10i64, "aa", "MATURED"),
+            (11, "bb", "STALE"),
+            (12, "cc", "MATURING"),
+        ] {
+            sqlx::query(&format!(
+                "INSERT INTO stakes (
+                    currency_address, block_hash, block_height, amount, found_by,
+                    source_txid, source_vout_num, source_amount, status
+                ) VALUES ($1, $2, $3, 1, $4, $5, 0, 50000000, '{status}')"
+            ))
+            .bind(currency.to_string())
+            .bind(format!("00000000000000000000000000000000000000000000000000000000000000{hash}"))
+            .bind(height)
+            .bind(found_by.to_string())
+            .bind("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let history = get_stake_count_history(&pool, &currency).await.unwrap();
+        assert_eq!(
+            history
+                .iter()
+                .map(|p| (p.height, p.count))
+                .collect::<Vec<_>>(),
+            vec![(10, 1), (12, 2)]
+        );
     }
 
     #[sqlx::test(migrations = "sql/migrations")]

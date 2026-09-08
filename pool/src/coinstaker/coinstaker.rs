@@ -258,7 +258,9 @@ impl CoinStaker {
     ///
     /// `listunspent(minconf=150)` drops the spent staking UTXO immediately and only
     /// includes the new coinbase at confirmations >= 150 (height N+149). Credit
-    /// `source_amount` for find height N through N+148 so the snapshot stays flat.
+    /// `source_amount` for find height N through N+148 so work (and payouts) stay
+    /// whole. The staking-balance graph still plots N at that work amount and
+    /// subtracts from N+1 through N+148.
     async fn add_work(
         &self,
         active_stakers: &[Staker],
